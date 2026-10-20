@@ -13,9 +13,29 @@ const origin=process.env.UI_TEST_URL || 'http://127.0.0.1:3000';
 const errors=[];
 try{
   const page=await browser.newPage({viewport:{width:1440,height:960}});
+  const revealProfileTool=async selector=>{
+    const details=page.locator('.memory-tools');
+    await details.waitFor();
+    if(await details.getAttribute('open')===null)await details.locator(':scope > summary').click();
+    await page.locator(selector).waitFor();
+  };
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin);
   await page.locator('#customer-count').waitFor();
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=','base64');
+  for(const viewport of [{width:1440,height:960},{width:390,height:844}]){
+    await page.setViewportSize(viewport);
+    const files=Array.from({length:10},(_,i)=>({name:`聊天-${i+1}.png`,mimeType:'image/png',buffer:png}));
+    await page.locator('#file-input').setInputFiles(files);
+    assert.equal(await page.locator('.image-thumb').count(),10);
+    await page.locator('#file-input').setInputFiles({name:'第11张.png',mimeType:'image/png',buffer:png});
+    assert.equal(await page.locator('.image-thumb').count(),10);
+    assert.ok((await page.locator('#toast').textContent()).includes('最多10张'));
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+    for(let remaining=10;remaining>0;remaining--)await page.locator('[data-remove]').last().click();
+    assert.equal(await page.locator('.image-thumb').count(),0);
+  }
+  await page.setViewportSize({width:1440,height:960});
   await page.locator('#demo-btn').click();
   await page.locator('#review-dialog').waitFor({state:'visible'});
   assert.equal(await page.locator('[data-review-index]').count(),3);
@@ -31,7 +51,7 @@ try{
   await page.locator('#shipment-form [name="title"]').fill('家具 · UI演示运输需求');
   await page.locator('#shipment-form button[type="submit"], #shipment-form .primary').click();
   await page.locator('#small-dialog').waitFor({state:'hidden'});
-  await page.locator('#new-quote').waitFor();
+  await revealProfileTool('#new-quote');
   const shipmentId=await page.locator('#shipment-select').inputValue();
   assert.ok(shipmentId);
   assert.equal(await page.locator('.message-row').count(),0);
@@ -41,7 +61,7 @@ try{
   await page.locator('#quote-form [name="status"]').selectOption({label:'已向客户报价'});
   await page.locator('#quote-form .primary').click();
   await page.locator('#small-dialog').waitFor({state:'hidden'});
-  await page.locator('.quote-card').waitFor();
+  await revealProfileTool('.quote-card');
   assert.ok((await page.locator('.quote-card').textContent()).includes('1250.50 USD'));
   await page.locator('#new-shipment').click();
   await page.locator('#shipment-form [name="title"]').fill('服装 · UI演示运输需求');
@@ -50,7 +70,7 @@ try{
   await page.waitForFunction(()=>document.querySelector('.shipment-profile h3')?.textContent==='服装 · UI演示运输需求');
   assert.equal(await page.locator('.quote-card').count(),0);
   await page.locator('#shipment-select').selectOption(shipmentId);
-  await page.locator('.quote-card').waitFor();
+  await revealProfileTool('.quote-card');
   await page.locator('#shipment-select').selectOption('');
   await page.locator('.message-row').first().waitFor();
   assert.equal(await page.locator('.message-row').count(),3);
@@ -63,7 +83,7 @@ try{
   await page.locator('.mobile-nav [data-panel="chat"]').click();
   await page.locator('#shipment-select').selectOption(shipmentId);
   await page.locator('.mobile-nav [data-panel="profile"]').click();
-  await page.locator('.quote-card').waitFor();
+  await revealProfileTool('.quote-card');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
   await page.locator('.mobile-nav [data-panel="chat"]').click();
   await page.locator('#shipment-select').selectOption('');
@@ -74,8 +94,8 @@ try{
   assert.equal(await page.locator('.conversation').isVisible(),true);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
   await page.setViewportSize({width:1440,height:960});
-  await page.locator('#settings-btn').click();
-  await page.locator('#settings-demo').click();
+  await page.reload();
+  await page.locator('#demo-btn').click();
   await page.locator('#review-dialog').waitFor({state:'visible'});
   await page.locator('#review-new-name').fill(`演示客户 · 多票审核 ${Date.now()}`);
   await page.locator('#review-shipment').selectOption('new');
@@ -90,16 +110,18 @@ try{
   const reviewedShipment=await page.locator('#shipment-select').inputValue();
   await page.locator('#shipment-select').selectOption('');
   await page.waitForFunction(()=>document.querySelectorAll('.message-row').length===0);
-  assert.ok(!(await page.locator('#profile-content').textContent()).includes('20 CBM'));
+  // 全部记录的记忆总结跨该客户的运输需求保留；聊天仍按所选需求隔离。
+  assert.ok((await page.locator('.memory-overview').textContent()).includes('20 CBM'));
   await page.locator('#shipment-select').selectOption(reviewedShipment);
   await page.locator('.message-row').first().waitFor();
+  await revealProfileTool('#new-quote');
   await page.locator('#new-quote').click();
   await page.locator('#quote-form [name="amount"]').fill('1250.50');
   await page.locator('#quote-form [name="scope"]').fill('海运至港；不含税费、清关及派送 · 演示报价');
   await page.locator('#quote-form [name="evidence_message_id"]').selectOption({index:1});
   await page.locator('#quote-form .primary').click();
   await page.locator('#small-dialog').waitFor({state:'hidden'});
-  await page.locator('.quote-card').waitFor();
+  await revealProfileTool('.quote-card');
   if(process.env.UI_SCREENSHOT_DIR){
     mkdirSync(process.env.UI_SCREENSHOT_DIR,{recursive:true});
     await page.screenshot({path:join(process.env.UI_SCREENSHOT_DIR,'desktop-v0.2.png'),fullPage:true});

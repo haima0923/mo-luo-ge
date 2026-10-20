@@ -84,7 +84,7 @@ test('模型输出中的越界事实来源、非法角色和缺失中文被拒�
 test('拒绝伪装图片、SVG和超出数量限制的上传',()=>{
   assert.throws(()=>decodeImages([{data:'data:image/png;base64,aGVsbG8='}]),/不符/);
   assert.throws(()=>decodeImages([{data:'data:image/svg+xml;base64,aGVsbG8='}]),/仅支持/);
-  assert.throws(()=>decodeImages(new Array(6).fill({})),/最多/);
+  assert.throws(()=>decodeImages(new Array(11).fill({})),/最多/);
 });
 test('千问调用携带隔离上下文与JSON要求，密钥仅作为服务端请求头',async()=>{
   let captured;

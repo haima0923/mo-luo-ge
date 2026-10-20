@@ -254,7 +254,7 @@ function addFiles(files){
   for(const file of files){
     if(!allowed.includes(file.type)){toast('只支持 PNG、JPEG、WebP 截图',true);continue;}
     if(file.size>8*1024**2 || state.files.reduce((s,x)=>s+x.file.size,0)+file.size>32*1024**2){toast('单张8MB、合计32MB以内',true);continue;}
-    if(state.files.length>=5){toast('一次最多5张截图',true);break;}
+    if(state.files.length>=10){toast('一次最多10张截图',true);break;}
     state.files.push({file,url:URL.createObjectURL(file)});
   }
   renderFiles();
