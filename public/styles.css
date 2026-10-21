@@ -82,3 +82,51 @@
 .small-dialog .reference-check{display:flex;align-items:center;gap:8px}
 .small-dialog .reference-check input{width:16px;height:16px;margin:0;accent-color:var(--green)}
 @media(max-width:900px){.reference-toolbar{flex-wrap:wrap}.reference-toolbar input{min-width:150px}.reply-copy{align-items:flex-start}}
+
+/* 左侧客户记忆入口、右侧回复面板 */
+.app-shell{grid-template-columns:280px minmax(380px,1fr) 360px}
+.client{padding:10px 8px;gap:6px}
+.client-chat{display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-align:left;background:transparent;border:0;padding:4px 0;color:inherit;border-radius:7px}
+.client-preview{display:block;font-size:11px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:6px}
+.client-actions{display:flex;flex-direction:column;align-items:flex-end;gap:7px;flex-shrink:0}
+.client-actions small{font-size:10px;color:var(--muted)}
+.memory-button{border:1px solid #d5e6db;border-radius:6px;background:#fff;color:var(--green);padding:6px 9px;font-size:10px;min-height:32px}
+.memory-button:hover{background:var(--green-pale);border-color:#aacdb8}
+.reply-panel{display:flex;flex-direction:column;min-width:0;min-height:0;background:#fff;border-left:1px solid var(--line)}
+.reply-panel #replies{flex:1;min-height:0;height:100%;max-height:none;overflow:auto;border-top:0;padding:24px 20px}
+.reply-panel .reply-head{flex-direction:column;align-items:stretch;gap:14px;margin-bottom:18px}
+.reply-panel .reply-heading{justify-content:space-between}
+.reply-panel .reply-head h3{font-size:14px}
+.reply-panel .reply-tabs{flex-wrap:wrap;gap:7px}
+.reply-panel .reply-tabs button{padding:7px 9px}
+.reply-panel .reply-tabs .reply-collapse{margin-left:auto;padding:0}
+.reply-panel .reply-copy,.reply-panel .custom-reply-actions{flex-wrap:wrap;gap:10px}
+.reply-panel .reply-text{font-size:13px;line-height:1.9}
+.reply-panel #custom-reply-text{min-height:120px;max-height:280px}
+.reply-panel .translation-languages{gap:12px;margin:18px 0}
+.memory-dialog{width:min(850px,calc(100vw - 24px));max-height:90dvh}
+.memory-dialog[open]{display:flex;flex-direction:column}
+.memory-dialog .dialog-head{flex-shrink:0}
+#memory-title{overflow-wrap:anywhere}
+.memory-scope{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:14px 26px;border-bottom:1px solid var(--line);flex-shrink:0}
+.memory-scope label{font-size:12px;color:var(--muted)}
+.memory-scope select{flex:1;min-width:0;border:1px solid var(--line);border-radius:7px;background:var(--bg);padding:8px;font-size:12px}
+.memory-scope span{width:100%;font-size:10px;color:var(--muted)}
+.memory-dialog .profile-content{display:block;overflow:auto;flex:1;min-height:0;padding:20px 26px}
+.memory-dialog .profile-content>.memory-overview,.memory-dialog .profile-content>.latest-summary,.memory-dialog .memory-tools{flex:none;max-height:none;overflow:visible}
+.memory-dialog .memory-overview-group h4{margin:0}
+@media(min-width:1500px){.app-shell{grid-template-columns:295px minmax(420px,1fr) 390px}}
+@media(min-width:901px) and (max-width:1100px){.app-shell{grid-template-columns:230px minmax(340px,1fr) 330px}.reply-panel #replies{padding:20px 15px}.client-chat{gap:7px}.client .avatar{width:32px;height:32px}}
+@media(max-width:900px){
+  .app-shell{display:block}
+  .reply-panel{display:none;height:100%;border:0}
+  body[data-panel=replies] .reply-panel{display:flex}
+  body[data-panel=replies] .conversation,body[data-panel=replies] .sidebar{display:none}
+  .reply-panel #replies{padding:20px 18px}
+  .memory-button{min-height:44px;min-width:48px}
+  .memory-dialog{max-height:94dvh}
+  .memory-dialog .dialog-head{padding:16px}
+  .memory-dialog .dialog-head h2{font-size:16px}
+  .memory-dialog .profile-content{padding:16px}
+  .memory-scope{padding:12px 16px}
+}

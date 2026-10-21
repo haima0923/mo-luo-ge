@@ -18,32 +18,68 @@ function setPanel(panel){document.body.dataset.panel=panel;document.querySelecto
 document.querySelectorAll('.mobile-nav button').forEach(b=>b.addEventListener('click',()=>setPanel(b.dataset.panel)));
 function avatar(name){return [...name.trim()][0]?.toUpperCase()||'M';}
 function time(value){return value?new Date(value).toLocaleDateString('zh-CN',{month:'numeric',day:'numeric'}):'';}
+const memoryView={id:null,shipment:null,detail:null,version:0};
+async function openCustomerMemory(id){
+  if(!$('memory-dialog').open)$('memory-dialog').showModal();
+  await loadCustomerMemory(id,state.selected===id?state.shipment:null);
+}
+async function loadCustomerMemory(id,shipment=null){
+  const version=++memoryView.version;
+  memoryView.id=id;memoryView.shipment=shipment;memoryView.detail=null;
+  $('memory-title').textContent=(state.customers.find(c=>c.id===id)?.name||'客户')+' · 客户记忆';
+  $('memory-scope').hidden=true;
+  $('profile-content').innerHTML='<div class="loading-block">读取客户记忆…</div>';
+  try{
+    const detail=await api(`/api/customers/${id}?shipment_id=${encodeURIComponent(shipment||'')}`);
+    if(version!==memoryView.version||!$('memory-dialog').open)return;
+    memoryView.detail=detail;
+    $('memory-title').textContent=detail.customer.name+' · 客户记忆';
+    $('memory-shipment').innerHTML=`<option value="">未分类 / 客户一般沟通</option>${detail.shipments.map(s=>`<option value="${s.id}">${esc(s.title)} · ${esc(s.status)}</option>`).join('')}`;
+    $('memory-shipment').value=shipment||'';$('memory-scope').hidden=false;
+    renderProfile();loadMemoryChinese(detail);
+  }catch(error){
+    if(version!==memoryView.version||!$('memory-dialog').open)return;
+    $('profile-content').innerHTML=`<p class="error-text">${esc(error.message)}</p><button type="button" id="retry-memory-load" class="button quiet">重试读取记忆</button>`;
+    $('retry-memory-load').onclick=()=>loadCustomerMemory(id,shipment);
+  }
+}
+async function refreshOpenMemory(id,shipment=memoryView.shipment){
+  if($('memory-dialog').open&&memoryView.id===id)await loadCustomerMemory(id,shipment);
+}
+$('memory-shipment').onchange=()=>loadCustomerMemory(memoryView.id,$('memory-shipment').value||null);
+$('memory-close').onclick=()=>$('memory-dialog').close();
+$('memory-dialog').addEventListener('close',()=>{
+  const id=memoryView.id;memoryView.version++;memoryView.id=null;memoryView.detail=null;
+  $('profile-content').innerHTML='';
+  document.querySelector(`[data-memory="${id}"]`)?.focus();
+});
 async function refreshCustomers(){state.customers=await api('/api/customers');renderCustomers();}
 function renderCustomers(){
   const q=$('customer-search').value.toLowerCase().trim();
   const customers=state.customers.filter(c=>[c.name,c.phone,c.city,c.last_message||''].some(t=>t.toLowerCase().includes(q)));
   $('customer-count').textContent=state.customers.length;
-  $('customer-list').innerHTML=customers.length?customers.map(c=>`<button class="client ${c.id===state.selected?'active':''}" data-customer="${esc(c.id)}"><div class="avatar">${esc(avatar(c.name))}</div><div class="client-copy"><div class="client-title"><strong>${esc(c.name)}</strong><small>${time(c.updated_at)}</small></div><p>${esc(c.last_message||c.city||'还没有聊天记录')}</p></div></button>`).join(''):`<div class="empty-list">${q?'没有匹配客户':'从一张截图开始<br>或点击 ＋ 建立客户档案'}</div>`;
+  $('customer-list').innerHTML=customers.length?customers.map(c=>`<div class="client ${c.id===state.selected?'active':''}"><button type="button" class="client-chat" data-customer="${esc(c.id)}" aria-label="打开${esc(c.name)}的聊天"><span class="avatar">${esc(avatar(c.name))}</span><span class="client-copy"><span class="client-title"><strong>${esc(c.name)}</strong></span><span class="client-preview">${esc(c.last_message||c.city||'还没有聊天记录')}</span></span></button><div class="client-actions"><small>${time(c.updated_at)}</small><button type="button" class="memory-button" data-memory="${esc(c.id)}" aria-haspopup="dialog" aria-controls="memory-dialog" aria-label="查看${esc(c.name)}的客户记忆">记忆</button></div></div>`).join(''):`<div class="empty-list">${q?'没有匹配客户':'从一张截图开始<br>或点击 ＋ 建立客户档案'}</div>`;
   document.querySelectorAll('[data-customer]').forEach(b=>b.onclick=()=>selectCustomer(b.dataset.customer));
+  document.querySelectorAll('[data-memory]').forEach(b=>b.onclick=()=>openCustomerMemory(b.dataset.memory));
 }
-async function selectCustomer(id,shipment=null){
-  state.selected=id;state.shipment=shipment;const version=++selectionVersion;renderCustomers();setPanel('chat');
+async function selectCustomer(id,shipment=null,keepPanel=false){
+  state.selected=id;state.shipment=shipment;const version=++selectionVersion;renderCustomers();if(!keepPanel)setPanel('chat');
   $('chat-area').innerHTML='<div class="loading-block">读取客户记忆…</div>';
-  $('replies').hidden=true;$('profile-content').innerHTML='<div class="loading-block">读取客户记忆…</div>';
-  try{const detail=await api(`/api/customers/${id}?shipment_id=${encodeURIComponent(shipment||'')}`);if(version!==selectionVersion)return;state.detail=detail;renderDetail();loadMemoryChinese(detail);}
+  $('replies').hidden=true;
+  try{const detail=await api(`/api/customers/${id}?shipment_id=${encodeURIComponent(shipment||'')}`);if(version!==selectionVersion)return;state.detail=detail;renderDetail();}
   catch(e){toast(e.message,true);}
 }
 async function reloadDetail(){if(state.selected)await selectCustomer(state.selected,state.shipment);await refreshCustomers();}
 const scopedMessages=messages=>messages.filter(m=>(m.shipment_id||null)===state.shipment);
 function renderDetail(){
-  const {customer,messages,facts,latest}=state.detail;
+  const {customer,messages,latest}=state.detail;
   $('active-name').textContent=customer.name;$('active-avatar').textContent=avatar(customer.name);
   $('active-meta').textContent=[customer.city,customer.preferred_language,customer.status].filter(Boolean).join(' · ');
   $('edit-customer').hidden=false;$('chat-search-wrap').hidden=false;$('chat-search').value='';
   $('demo-notice').hidden=!latest?.demo;
   $('shipment-bar').hidden=false;
   $('shipment-select').innerHTML=`<option value="">未分类 / 客户一般沟通</option>${state.detail.shipments.map(s=>`<option value="${s.id}" ${s.id===state.shipment?'selected':''}>${esc(s.title)} · ${esc(s.status)}</option>`).join('')}`;
-  renderMessages(scopedMessages(messages));renderProfile(customer,facts,latest);renderReplies(latest);
+  renderMessages(scopedMessages(messages));renderReplies(latest);
 }
 function renderMessages(messages){
   $('chat-area').innerHTML=messages.length?messages.map(m=>`<article id="msg-${m.id}" class="message-row ${m.speaker==='self'?'self':''}"><div class="avatar message-avatar">${m.speaker==='self'?'我':esc(avatar(state.detail.customer.name))}</div><div class="message-body"><div class="message-meta"><span>${m.speaker==='self'?'我的消息':'客户'}</span><span>${esc(m.visible_time||'截图未显示时间')}</span>${m.uncertain?'<span class="warning-tag">需留意识别</span>':''}</div><div class="bubble"><p class="original" dir="auto">${esc(m.original)}</p><div class="translation"><span>中文理解</span>${esc(m.chinese)}</div></div><div class="message-tools"><button class="text-button" data-copy-message="${m.id}">复制原文</button><button class="text-button" data-edit-message="${m.id}">校对</button><button class="text-button" data-delete-message="${m.id}">删除</button>${m.screenshots.map((s,i)=>`<button class="text-button" data-image="${s.id}">截图${i+1}</button>`).join('')}</div></div></article>`).join(''):'<div class="empty-list">这位客户还没有聊天记录。<br>上传截图或粘贴原话，开始第一轮分析。</div>';
@@ -62,7 +98,7 @@ async function loadMemoryChinese(detail){
   if(!detail?.memory)return;
   const id=detail.customer.id,revision=detail.memory.revision,job=id+':'+revision;
   const pending=detail.memory.sections.flatMap(section=>section.items||[]).filter(item=>!item.chinese);
-  const current=()=>state.selected===id&&state.detail?.memory?.revision===revision;
+  const current=()=>$('memory-dialog').open&&memoryView.id===id&&memoryView.detail?.memory?.revision===revision;
   if(!pending.length||memoryJobs.has(job))return;
   if(!state.status.qwen_configured){if(current()&&$('memory-translation-status'))$('memory-translation-status').textContent='配置千问后可补充旧外文记忆的中文解释。';return;}
   memoryJobs.add(job);
@@ -73,7 +109,7 @@ async function loadMemoryChinese(detail){
       const result=await post(`/api/customers/${id}/memory/translate`,{revision,fact_ids:pending.slice(offset,offset+10).map(item=>item.fact_id)});
       if(!current())return;
       for(const translation of result.translations){
-        const item=state.detail.memory.sections.flatMap(section=>section.items||[]).find(item=>item.fact_id===translation.fact_id);
+        const item=memoryView.detail.memory.sections.flatMap(section=>section.items||[]).find(item=>item.fact_id===translation.fact_id);
         if(!item)continue;item.chinese=translation.chinese;
         document.querySelectorAll(`[data-memory-chinese="${translation.fact_id}"]`).forEach(element=>{element.textContent=translation.chinese;});
       }
@@ -82,34 +118,33 @@ async function loadMemoryChinese(detail){
   }catch(error){if(current()&&$('memory-translation-status')){$('memory-translation-status').textContent=error.message;$('retry-memory-translation').hidden=false;}}
   finally{memoryJobs.delete(job);}
 }
-function renderProfile(customer,facts,latest){
-  const detail=state.detail,allFacts=detail.facts,active=allFacts.filter(f=>f.state==='active'),old=allFacts.filter(f=>f.state!=='active');
+function renderProfile(){
+  const detail=memoryView.detail,{customer,latest}=detail,shipmentId=memoryView.shipment,allFacts=detail.facts,active=allFacts.filter(f=>f.state==='active'),old=allFacts.filter(f=>f.state!=='active');
   const memory=detail.memory;
   const factHtml=f=>`<div class="fact ${f.certainty==='inferred'?'inferred':''} ${f.state}"><div class="fact-label"><span>${esc(labels[f.field])}${f.shipment_id?' · '+esc(detail.shipments.find(s=>s.id===f.shipment_id)?.title||'运输需求'):''}</span><span>${f.state==='superseded'?'已被更新':f.state==='needs_review'?'原消息变更 · 待复核':f.certainty==='inferred'?'AI推测':'客户明确陈述'}</span></div><div class="fact-value">${esc(f.value)}</div><button class="fact-source" data-source="${f.id}">查看消息来源 ↗</button></div>`;
-  const pending=state.draft?.customer_id===customer.id&&(state.draft.shipment_id||null)===state.shipment?state.draft:null;
+  const pending=state.draft?.customer_id===customer.id&&(state.draft.shipment_id||null)===shipmentId?state.draft:null;
   const batch=pending?{...pending.analysis,screenshots:pending.screenshots,demo:pending.demo,created_at:pending.created_at}:latest;
   const imageCount=batch?.screenshots?.length||0;
   $('profile-content').innerHTML=`<section class="memory-overview" aria-label="全部记录的记忆总结"><div class="memory-section-head"><h3>全部记录的记忆总结</h3><span class="small-badge">自动汇总</span></div><p class="memory-meta">${esc(memory?.introduction||'尚无已归档记忆')}</p>${memory?.sections.length?memory.sections.map(memorySectionHtml).join(''):'<p class="memory-empty">确认并归档聊天后，这里会汇总该客户的全部有效记忆。</p>'}${memory?.needs_review_count?`<p class="warning-tag memory-meta">${memory.needs_review_count} 项记忆的来源有变更，已从当前总结排除，等待复核。</p>`:''}<p id="memory-translation-status" class="memory-meta" role="status" aria-live="polite"></p><button type="button" id="retry-memory-translation" class="text-button" hidden>重试中文解释</button><details class="memory-sources"><summary>查看记忆来源 · ${active.length} 项</summary>${active.map(factHtml).join('')||'<p class="memory-empty">暂无有效记忆</p>'}</details></section><section class="latest-summary" aria-label="本次聊天图片总结"><div class="memory-section-head"><h3>本次聊天图片总结</h3></div>${batch?`<p class="memory-meta">${pending?'待确认 · 尚未写入客户记忆':'最近一次已归档'} · ${imageCount?imageCount+' 张图片':'文本聊天'}${batch.demo?' · 固定演示':''}</p>${batch.stale?'<p class="warning-tag">消息、报价或运输需求有变更，本次旧总结已停用，请重新分析。</p>':`<p class="batch-summary-text">${esc(batch.summary||'本次没有可用的沟通总结。')}</p>`}`:'<p class="memory-empty">分析当前客户的聊天截图后，这里显示本次总结；上方保留全部已归档记忆。</p>'}</section><details class="memory-tools"><summary>客户资料、运输需求与历史记忆</summary><div class="profile-details"><p><span>联系信息</span><strong>${esc(customer.phone||'未记录')}</strong></p><p><span>归档消息</span><strong>${memory?.message_count||0} 条</strong></p><p><span>客户状态</span><strong>${esc(customer.status)}</strong></p></div><div id="shipment-profile"></div>${old.length?`<details><summary class="section-label">历史与待复核 · ${old.length} 项</summary>${old.map(factHtml).join('')}</details>`:''}<div class="section-label">数据留档</div><button id="export-customer" class="button quiet full">导出客户文字档案 ↓</button></details>`;
-  $('retry-memory-translation').onclick=()=>loadMemoryChinese(state.detail);
+  $('retry-memory-translation').onclick=()=>loadMemoryChinese(detail);
   document.querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>{const f=allFacts.find(f=>f.id===b.dataset.source);showSmall('记忆来源',`<p>${esc(labels[f.field])}：${esc(f.value)}</p><div class="source-quote" dir="auto">${esc(f.evidence)}</div><p class="translation">${esc(f.evidence_chinese)}</p><p>${esc(f.evidence_time||'原截图无可见时间')}</p>`);});
   $('export-customer').onclick=()=>{const a=document.createElement('a');a.href=`/api/customers/${customer.id}/export`;a.download='customer-export.json';a.click();};
-  const shipment=detail.shipments.find(s=>s.id===state.shipment),quotes=detail.quotes.filter(q=>q.shipment_id===state.shipment);
+  const shipment=detail.shipments.find(s=>s.id===shipmentId),quotes=detail.quotes.filter(q=>q.shipment_id===shipmentId);
   const business=$('shipment-profile');business.className='shipment-profile';
   business.innerHTML=shipment?`<div class="section-label"><span>这票运输需求</span><button id="edit-shipment" class="text-button">编辑</button></div><h3>${esc(shipment.title)}</h3><p>${esc(shipment.status)}</p>${shipment.notes?`<p>${esc(shipment.notes)}</p>`:''}<div class="section-label"><span>报价记录 · ${quotes.length}</span><button id="new-quote" class="text-button">＋ 记录报价</button></div><p class="identity-hint">手动录入实际报价；新记录保留旧金额。</p>${quotes.map(q=>`<div class="quote-card"><strong>${esc(q.amount)} ${esc(q.currency)}</strong><span class="small-badge">${esc(q.status)}</span><p>${esc(q.scope)}</p><p>有效期：${esc(q.valid_until||'未注明')}</p>${q.notes?`<p>${esc(q.notes)}</p>`:''}<small>${q.state==='needs_review'?'来源已校对或删除 · 待复核':q.evidence_message_id?'有消息来源':'人工录入 · 未关联消息'}</small>${q.evidence_message_id?`<button class="fact-source" data-quote-source="${q.id}">查看来源 ↗</button>`:''}</div>`).join('')}`:`<div class="section-label">运输需求 · ${detail.shipments.length} 票</div><p class="identity-hint">每票货物分别归档，避免新旧货量混淆。</p><button id="profile-new-shipment" class="button quiet full">＋ 新建运输需求</button>`;
-  if(shipment){$('edit-shipment').onclick=()=>shipmentForm(shipment);$('new-quote').onclick=quoteForm;}
-  else $('profile-new-shipment').onclick=()=>shipmentForm();
+  if(shipment){$('edit-shipment').onclick=()=>shipmentForm(shipment,customer.id,true);$('new-quote').onclick=()=>quoteForm(customer.id,shipmentId,detail);}
+  else $('profile-new-shipment').onclick=()=>shipmentForm(null,customer.id,true);
   document.querySelectorAll('[data-quote-source]').forEach(b=>b.onclick=()=>{const q=quotes.find(q=>q.id===b.dataset.quoteSource),m=detail.messages.find(m=>m.id===q.evidence_message_id);showSmall('报价来源',m?`<div class="source-quote" dir="auto">${esc(m.original)}</div><p>${esc(m.chinese)}</p>`:'来源消息已删除，请复核报价。');});
 }
-function shipmentForm(shipment=null){
-  const customerId=state.selected;if(!customerId)return toast('请先选择客户',true);
+function shipmentForm(shipment=null,customerId=state.selected,fromMemory=false){
+  if(!customerId)return toast('请先选择客户',true);
   showSmall(shipment?'编辑运输需求':'新建运输需求',`<form id="shipment-form"><label>这票货物的名称<input name="title" maxlength="120" value="${esc(shipment?.title||'')}" placeholder="例如：家具 · 义乌到卡萨布兰卡" required></label><label>状态<select name="status">${shipmentStatuses.map(s=>`<option ${s===shipment?.status?'selected':''}>${s}</option>`).join('')}</select></label><label>人工备注<textarea name="notes" maxlength="2000" rows="3">${esc(shipment?.notes||'')}</textarea></label><p>每票货物拥有独立消息、事实和报价。既有未分类记录不会自动迁入。</p><div class="buttons"><button class="button primary">保存运输需求</button></div></form>`);
-  $('shipment-form').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));try{const path=`/api/customers/${customerId}/shipments`;const s=shipment?await api(`${path}/${shipment.id}`,{method:'PATCH',body:JSON.stringify(b)}):await post(path,b);$('small-dialog').close();await selectCustomer(customerId,s.id);await refreshCustomers();}catch(e){toast(e.message,true);}};
+  $('shipment-form').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));try{const path=`/api/customers/${customerId}/shipments`;const s=shipment?await api(`${path}/${shipment.id}`,{method:'PATCH',body:JSON.stringify(b)}):await post(path,b);$('small-dialog').close();if(!fromMemory)await selectCustomer(customerId,s.id);else if(state.selected===customerId)await selectCustomer(customerId,state.shipment,true);await refreshCustomers();await refreshOpenMemory(customerId,fromMemory?s.id:undefined);}catch(e){toast(e.message,true);}};
 }
-function quoteForm(){
-  const customerId=state.selected,shipmentId=state.shipment;
-  const messages=scopedMessages(state.detail.messages);
+function quoteForm(customerId=state.selected,shipmentId=state.shipment,detail=state.detail){
+  const messages=detail.messages.filter(m=>(m.shipment_id||null)===shipmentId);
   showSmall('记录实际报价',`<form id="quote-form"><div class="review-grid"><label>金额<input name="amount" inputmode="decimal" placeholder="例如：1250.00" maxlength="20" required></label><label>币种<select name="currency">${['USD','CNY','EUR','MAD','AED','GBP'].map(c=>`<option>${c}</option>`).join('')}</select></label></div><label>包含及不包含的范围<textarea name="scope" rows="3" maxlength="2000" placeholder="例如：海运至港；不含清关、税费和派送" required></textarea></label><label>有效期（可留空）<input type="date" name="valid_until"></label><label>状态<select name="status">${quoteStatuses.map(s=>`<option>${s}</option>`).join('')}</select></label><label>消息来源<select name="evidence_message_id"><option value="">人工录入，未关联消息</option>${messages.map(m=>`<option value="${m.id}">${esc(m.chinese.slice(0,90))}</option>`).join('')}</select></label><label>备注<textarea name="notes" rows="2" maxlength="2000"></textarea></label><p>只记录你已核对的报价；不会计算运价或自动发送。金额和币种保存后不覆盖，修订时新增一条。</p><div class="buttons"><button class="button primary">保存报价记录</button></div></form>`);
-  $('quote-form').onsubmit=async e=>{e.preventDefault();try{await post(`/api/customers/${customerId}/shipments/${shipmentId}/quotes`,Object.fromEntries(new FormData(e.target)));$('small-dialog').close();await selectCustomer(customerId,shipmentId);toast('报价已记录');}catch(e){toast(e.message,true);}};
+  $('quote-form').onsubmit=async e=>{e.preventDefault();try{await post(`/api/customers/${customerId}/shipments/${shipmentId}/quotes`,Object.fromEntries(new FormData(e.target)));$('small-dialog').close();if(state.selected===customerId)await selectCustomer(customerId,state.shipment,true);await refreshOpenMemory(customerId);toast('报价已记录');}catch(e){toast(e.message,true);}};
 }
 $('shipment-select').onchange=()=>selectCustomer(state.selected,$('shipment-select').value||null);
 $('new-shipment').onclick=()=>shipmentForm();
@@ -281,7 +316,7 @@ async function demo(){try{const d=await post('/api/demo',{});openReview(d);await
 $('demo-btn').onclick=demo;
 function openReview(draft){
   state.draft=draft;
-  if(state.detail&&draft.customer_id===state.selected)renderProfile(state.detail.customer,state.detail.facts,state.detail.latest);
+  if($('memory-dialog').open&&memoryView.detail&&draft.customer_id===memoryView.id)renderProfile();
   const a=draft.analysis;
   const options=draft.demo?`<option value="new">新建演示客户</option>`:draft.customer_id?`<option value="${draft.customer_id}">${esc(state.customers.find(c=>c.id===draft.customer_id)?.name||'当前客户')}</option>`:`<option value="">请确认这是谁的聊天</option><option value="new">新建客户档案</option>${state.customers.map(c=>`<option value="${c.id}">${esc(c.name)} ${esc(c.phone)}</option>`).join('')}`;
   $('review-body').innerHTML=`${a.warnings.length?`<div class="warning-box">${a.warnings.map(esc).join('<br>')}</div>`:''}<section class="review-step"><h3>01 · 确认客户</h3><p class="identity-hint">${a.identity.name||a.identity.phone?`图片身份线索：${esc(a.identity.name)} ${esc(a.identity.phone)}。仅供参考，请自行核对。`:'没有足够的客户身份线索，请确认归属。'}${draft.customer_id?' 本次分析已使用所选客户记忆，如归属错误请关闭并重新分析。':''}</p><select id="review-target" required>${options}</select><div id="new-target-fields" ${draft.demo?'':'hidden'}><label>新客户姓名<input id="review-new-name" maxlength="120" value="${esc(a.identity.name||'')}" placeholder="请输入可辨识的客户姓名"></label><label>电话 / 联系标识<input id="review-new-phone" maxlength="80" value="${esc(a.identity.phone||'')}"></label></div></section><section class="review-step"><h3>02 · 校对原文与中文</h3>${a.messages.map((m,i)=>`<div class="review-message" data-review-index="${i}"><div class="review-message-head"><b>消息 ${i+1}</b><select data-m-speaker="${i}" aria-label="消息${i+1}发送方"><option value="customer" ${m.speaker==='customer'?'selected':''}>客户</option><option value="self" ${m.speaker==='self'?'selected':''}>我</option><option value="unknown" ${m.speaker==='unknown'?'selected':''}>需确认</option></select><input data-m-time="${i}" value="${esc(m.visible_time)}" placeholder="截图可见时间" aria-label="消息${i+1}时间"><label><input type="checkbox" data-m-uncertain="${i}" ${m.uncertain?'checked':''}>识别待留意</label></div><div class="review-grid"><label><span>原文 · ${esc(m.language)}</span><textarea data-m-original="${i}" dir="auto" maxlength="6000" required>${esc(m.original)}</textarea></label><label><span>中文理解</span><textarea data-m-chinese="${i}" maxlength="6000" required>${esc(m.chinese)}</textarea></label></div></div>`).join('')}</section><section class="review-step"><h3>03 · 选择写入的客户记忆</h3><p class="identity-hint">客户明确信息默认勾选；AI 推测默认不选。可修改内容，同字段变化保留历史。不同批次货物需谨慎核对。</p>${a.facts.length?a.facts.map((f,i)=>`<label class="fact-review"><input type="checkbox" data-f-check="${i}" ${f.certainty==='stated'?'checked':''}><div><p>${esc(labels[f.field])} · ${f.certainty==='stated'?'客户明确陈述':'AI推测'} · 来源消息${f.message_index+1}</p><input type="text" data-f-value="${i}" maxlength="1500" value="${esc(f.value)}"></div></label>`).join(''):'<p class="identity-hint">本次没有提取到新增事实。</p>'}</section>`;
@@ -321,7 +356,7 @@ $('review-form').onsubmit=async e=>{
   try{const result=await post(`/api/drafts/${d.id}/commit`,b);$('review-dialog').close();state.draft=null;state.files.forEach(x=>URL.revokeObjectURL(x.url));state.files=[];renderFiles();$('message-input').value='';await refreshCustomers();await selectCustomer(result.customer_id,result.shipment_id||null);await refreshDrafts();toast(`已归档 ${result.inserted} 条新消息${result.skipped?`，跳过 ${result.skipped} 条重叠消息`:''}`);}
   catch(e){toast(e.message,true);}finally{$('commit-btn').disabled=false;}
 };
-async function refreshDrafts(){const drafts=await api('/api/drafts');$('draft-count').textContent=drafts.length;if(state.draft&&!drafts.some(d=>d.id===state.draft.id)){state.draft=null;if(state.detail)renderProfile(state.detail.customer,state.detail.facts,state.detail.latest);}return drafts;}
+async function refreshDrafts(){const drafts=await api('/api/drafts');$('draft-count').textContent=drafts.length;if(state.draft&&!drafts.some(d=>d.id===state.draft.id)){state.draft=null;if($('memory-dialog').open&&memoryView.detail)renderProfile();}return drafts;}
 $('recover-btn').onclick=async()=>{try{const drafts=await refreshDrafts();showSmall('待审核草稿',drafts.length?drafts.map(d=>`<div class="draft-item"><p>${d.demo?'固定演示':esc(state.customers.find(c=>c.id===d.customer_id)?.name||'未确认客户')}<br>${new Date(d.created_at).toLocaleString('zh-CN')}</p><div><button class="button" data-open-draft="${d.id}">审核</button> <button class="button danger" data-remove-draft="${d.id}">删除</button></div></div>`).join(''):'<p>没有待审核的草稿。</p>');document.querySelectorAll('[data-open-draft]').forEach(b=>b.onclick=async()=>{try{const d=await api(`/api/drafts/${b.dataset.openDraft}`);$('small-dialog').close();openReview(d);}catch(e){toast(e.message,true);}});document.querySelectorAll('[data-remove-draft]').forEach(b=>b.onclick=async()=>{try{await api(`/api/drafts/${b.dataset.removeDraft}`,{method:'DELETE'});b.closest('.draft-item').remove();await refreshDrafts();toast('草稿及对应截图已删除');}catch(e){toast(e.message,true);}});}catch(e){toast(e.message,true);}};
 const qwenRegions = [
   ['北京', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
