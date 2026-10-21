@@ -93,3 +93,28 @@
 `POST /api/customers/:id/replies/refresh` 输入 `{draft_id:"当前最近一次归档ID",shipment_id:null}`，根据该聊天和当前有效资料重生成三种回复，仅更新原分析的replies及资料元数据，不改写消息、事实和摘要。原聊天已失效、最近批次变化或资料生成中变动时返回409。新图片/文本分析也会先识别再匹配资料生成回复。
 
 分析保存reference_revision及reference_sources（仅条目ID、标题、分类、条件、有效期、更新时间，不复制全文）。每种回复有reference_ids，模型引用未提供的ID会被拒绝。客户详情latest.references_stale动态反映资料变更或过期，独立于原消息stale，不会因此停用本次图片摘要。独立SQLite资料库随标准备份保存，不修改客户数据库结构。
+
+## 数据库智库（v0.3.0）
+
+全部接口受现有登录、同源和Host保护；群聊历史是明确人工导入的共享资料，不自动汇入其他客户私有记录。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| GET / POST | `/api/intelligence/groups` | 群列表、待审核草稿 / 新建独立群 `{name,notes?}` |
+| POST | `/api/intelligence/analyze` | `{group_id,chat_date?,text?,images?}` 同群逐张识别后保存草稿，最多10图、32MB |
+| GET / DELETE | `/api/intelligence/drafts/:id` | 读取 / 删除未归档草稿及其截图 |
+| POST | `/api/intelligence/drafts/:id/commit` | 人工确认 `{messages,links}`；不允许漏掉草稿消息或跨群关联 |
+| GET | `/api/intelligence/inquiries?group_id=&q=&status=&offset=&limit=` | 全历史产品询价检索与分页；status 为 unquoted/quoted/needs_review 或空 |
+| GET | `/api/intelligence/inquiries/:id` | 询问者原文、原截图、全部回复、报价和@状态 |
+| GET | `/api/intelligence/messages?group_id=&q=&offset=&limit=` | 全部群消息检索与分页，group_id可空 |
+| GET / PATCH | `/api/intelligence/messages/:id` | 读取 / 完整校对消息，PATCH需携带最新updated_at，保留旧版本并停用旧关联 |
+| GET | `/api/intelligence/messages/:id/history` | 原消息校对版本 |
+| GET | `/api/intelligence/images/:id` | 受保护的原始群截图 |
+| POST | `/api/intelligence/links` | 人工关联 `{inquiry_id,reply_id,offer_index:null或整数}`；null只代表普通回复 |
+| DELETE | `/api/intelligence/links/:id` | 撤销关联，保留历史关系记录 |
+| POST | `/api/intelligence/match` | `{query}` 全部已审核群聊的产品/别名检索 |
+| GET / POST | `/api/customers/:id/intelligence` | 读取当前客户/运输需求的相关历史；POST用千问提取产品后匹配，输入 `{shipment_id?}` |
+
+消息字段为sender、original、chinese、visible_date、visible_time、mentions[]、products[{name,specs,keywords}]、offers[{product,price,terms}]和uncertain。报价价格必须照抄该条原文，mentions必须在原文中可见。每种products单独形成询价；普通回复不会清除待报价状态。身份不明的关联计为needs_review。links为本批reply_index与新inquiry_index或同群历史inquiry_id关联；offer_index指回复中的具体报价，必须有效。AI建议不自动归档，commit仅写入人工确认的links。
+
+长批次推荐在analyze请求中传入 `async:true`，立即返回202和job_id；`GET /api/intelligence/jobs/:id`（同样需登录）返回running/completed/failed。completed含已持久保存的draft_id，failed仅包含清理过的错误。进度状态保留在当前服务进程，完成的待审核草稿独立持久保存；如服务重启后进度不可用，先检查待审核列表。同步调用仍返回201草稿，兼容现有调用方。

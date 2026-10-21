@@ -2,13 +2,15 @@ import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHmac, timingSafeEqual, createHash } from 'node:crypto';
+import { createHmac, timingSafeEqual, createHash, randomUUID } from 'node:crypto';
 import { Store } from './lib/store.mjs';
 import { HttpError, object, str, decodeImages, validateMessages } from './lib/core.mjs';
 import { createQwen, createReplyTranslator, createMemoryTranslator, createReferenceReplies, TRANSLATION_LANGUAGES } from './lib/qwen.mjs';
 import { memoryFactKey } from './lib/memory.mjs';
 import { QwenSettings } from './lib/settings.mjs';
 import { DEMO } from './lib/demo.mjs';
+import { createIntelligenceAnalyzer,extractIntelligenceQuery } from './lib/intelligence-ai.mjs';
+import { chatDate } from './lib/intelligence.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const loopback = h => ['127.0.0.1', 'localhost', '::1'].includes(h);
@@ -43,6 +45,7 @@ export function createApp(config = readConfig(), options = {}) {
   const sign = timestamp => createHmac('sha256', config.password).update(timestamp).digest('hex');
   const attempts = new Map();
   const active = new Set();
+  const intelligenceJobs=new Map();
   function referenceMetadata(revision,entries){return {reference_revision:revision,reference_sources:entries.map(({id,title,category,scope,valid_until,updated_at})=>({id,title,category,scope,valid_until,updated_at}))};}
   function referenceState(analysis){
     if(!analysis||analysis.demo)return analysis;
@@ -89,7 +92,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.2.6'
+        model: settings.view().model, version: '0.3.0'
       });
       if (method === 'POST' && path === '/api/login') {
         const ip = req.socket.remoteAddress || 'local', entry = attempts.get(ip) || { count: 0, until: 0 };
@@ -106,6 +109,81 @@ export function createApp(config = readConfig(), options = {}) {
       }
       if (method === 'POST' && path === '/api/logout') return send(200, { ok: true }, { 'Set-Cookie': 'crm_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
       if (path.startsWith('/api/') && !auth(req)) throw new HttpError(401, '请先登录。');
+      if(path.startsWith('/api/intelligence')||/\/intelligence$/.test(path)){
+        const intel=store.intelligence,url=new URL(req.url,origin);
+        if(path==='/api/intelligence/groups'){
+          if(method==='GET')return send(200,{groups:intel.groups(),drafts:intel.ready()});
+          if(method==='POST')return send(201,intel.createGroup(await readJson(req)));
+        }
+        if(path==='/api/intelligence/messages'&&method==='GET')return send(200,intel.messages(url.searchParams.get('group_id')||'',Object.fromEntries(url.searchParams)));
+        if(path==='/api/intelligence/inquiries'&&method==='GET')return send(200,intel.search(url.searchParams.get('q')||'',Object.fromEntries(url.searchParams)));
+        if(path==='/api/intelligence/match'&&method==='POST'){
+          const body=await readJson(req);return send(200,intel.search(str(body.query||'',3000),{limit:8}));
+        }
+        const groupMatch=path.match(new RegExp(`^/api/intelligence/groups/(${idPattern})/messages$`));
+        if(groupMatch&&method==='GET')return send(200,intel.messages(groupMatch[1],Object.fromEntries(url.searchParams)));
+        const imageMatch=path.match(new RegExp(`^/api/intelligence/images/(${idPattern})$`));
+        if(imageMatch&&method==='GET'){
+          const image=intel.image(imageMatch[1]);res.writeHead(200,{'Content-Type':image.mime,'Cache-Control':'no-store'});return res.end(readFileSync(join(config.dataDir,image.path)));
+        }
+        if(path==='/api/intelligence/analyze'&&method==='POST'){
+          if(active.size>=2)throw new HttpError(429,'已有分析正在进行，请稍后重试。');
+          const body=await readJson(req),group=intel.group(str(body.group_id,36,true)),images=decodeImages(body.images||[]),text=str(body.text||'',16000),chat_date=chatDate(body.chat_date||'');
+          if(!images.length&&!text)throw new HttpError(400,'请上传同一微信群的截图或输入聊天原文。');
+          const key=Symbol();active.add(key);
+          const run=async()=>{
+            try{
+              const analyze=options.analyzeIntelligence||createIntelligenceAnalyzer(settings.config(),options.qwenFetcher);
+              const analysis=await analyze({images,text,group,context:messages=>intel.context(group.id,messages)});
+              return intel.saveDraft({group_id:group.id,chat_date,analysis,images});
+            }finally{active.delete(key);}
+          };
+          if(body.async===true){
+            for(const [id,job] of intelligenceJobs)if(job.status!=='running'&&(Date.now()-job.started_at>1800000||intelligenceJobs.size>=100))intelligenceJobs.delete(id);
+            const id=randomUUID(),job={job_id:id,status:'running',started_at:Date.now()};intelligenceJobs.set(id,job);
+            run().then(draft=>Object.assign(job,{status:'completed',draft_id:draft.id}),error=>Object.assign(job,{status:'failed',error:error instanceof HttpError?error.message:'智库识别失败，请重试。',status_code:error instanceof HttpError?error.status:500}));
+            return send(202,{job_id:id,status:'running'});
+          }
+          return send(201,await run());
+        }
+        const jobMatch=path.match(new RegExp(`^/api/intelligence/jobs/(${idPattern})$`));
+        if(jobMatch&&method==='GET'){
+          const job=intelligenceJobs.get(jobMatch[1]);if(!job)throw new HttpError(404,'识别任务状态不可用，请先查看待审核导入，必要时重新上传。');
+          return send(200,job);
+        }
+        const draftMatch=path.match(new RegExp(`^/api/intelligence/drafts/(${idPattern})(/commit)?$`));
+        if(draftMatch){
+          if(draftMatch[2]&&method==='POST')return send(200,intel.commit(draftMatch[1],await readJson(req)));
+          if(!draftMatch[2]&&method==='GET')return send(200,intel.draft(draftMatch[1]));
+          if(!draftMatch[2]&&method==='DELETE'){intel.removeDraft(draftMatch[1]);return send(200,{ok:true});}
+        }
+        const inquiryMatch=path.match(new RegExp(`^/api/intelligence/inquiries/(${idPattern})$`));
+        if(inquiryMatch&&method==='GET')return send(200,intel.inquiryDetail(inquiryMatch[1]));
+        const messageMatch=path.match(new RegExp(`^/api/intelligence/messages/(${idPattern})(/history)?$`));
+        if(messageMatch){
+          if(method==='GET')return send(200,messageMatch[2]?{versions:intel.history(messageMatch[1])}:intel.message(messageMatch[1]));
+          if(!messageMatch[2]&&method==='PATCH')return send(200,intel.reviseMessage(messageMatch[1],await readJson(req)));
+        }
+        if(path==='/api/intelligence/links'&&method==='POST'){
+          const body=await readJson(req);return send(200,intel.link(str(body.inquiry_id,36,true),str(body.reply_id,36,true),body.offer_index??null,'人工确认关联'));
+        }
+        const linkMatch=path.match(new RegExp(`^/api/intelligence/links/(${idPattern})$`));
+        if(linkMatch&&method==='DELETE')return send(200,intel.removeLink(linkMatch[1]));
+        const customerMatch=path.match(new RegExp(`^/api/customers/(${idPattern})/intelligence$`));
+        if(customerMatch&&(method==='GET'||method==='POST')){
+          const customerId=customerMatch[1],body=method==='POST'?await readJson(req):{},shipmentId=body.shipment_id||url.searchParams.get('shipment_id')||null;
+          const detail=store.detail(customerId,'',shipmentId),messages=detail.messages.filter(m=>(m.shipment_id||null)===shipmentId).slice(-20);
+          let terms=detail.latest?.stale?[]:detail.latest?.product_terms||[];
+          if(method==='POST'){
+            if(active.size>=2)throw new HttpError(429,'已有分析正在进行，请稍后重试。');
+            const key=Symbol();active.add(key);try{terms=await extractIntelligenceQuery(settings.config(),options.qwenFetcher,messages.map(m=>({speaker:m.speaker,original:m.original,chinese:m.chinese})));}finally{active.delete(key);}
+          }
+          if(!terms.length)terms=detail.facts.filter(f=>f.field==='goods'&&f.state==='active'&&(f.shipment_id||null)===shipmentId).map(f=>f.value);
+          const query=(terms.length?terms.join(' '):messages.filter(m=>m.speaker==='customer').slice(-3).map(m=>m.chinese+' '+m.original).join(' ')).slice(0,3000);
+          return send(200,{...query?intel.search(query,{limit:8}):{items:[],total:0,query:'',tokens:[]},terms});
+        }
+        throw new HttpError(404,'智库接口不存在。');
+      }
       if (method === 'GET' && path === '/api/references') return send(200,{entries:store.library.list(new URL(req.url,origin).searchParams.get('q')||''),revision:store.library.revision()});
       if (method === 'POST' && path === '/api/references') return send(201,store.library.save(await readJson(req)));
       const referenceMatch=path.match(new RegExp(`^/api/references/(${idPattern})$`));
@@ -255,7 +333,7 @@ export function createApp(config = readConfig(), options = {}) {
         res.writeHead(200, { 'Content-Type':image.mime,'Cache-Control':'no-store','Content-Disposition':'inline' });
         return res.end(readFileSync(join(config.dataDir,image.path)));
       }
-      const staticFiles = { '/':'index.html', '/app.js':'app.js', '/styles.css':'styles.css' };
+      const staticFiles = { '/':'index.html', '/app.js':'app.js', '/intelligence-ui.js':'intelligence-ui.js', '/styles.css':'styles.css' };
       if (method === 'GET' && staticFiles[path]) {
         const file = staticFiles[path];
         res.writeHead(200,{ 'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8','Cache-Control':'no-cache' });

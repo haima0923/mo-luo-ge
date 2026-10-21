@@ -15,10 +15,22 @@ try{
     const library=new DatabaseSync(join(config.dataDir,'company-knowledge.sqlite'),{readOnly:true});
     try{await backup(library,join(target,'company-knowledge.sqlite'));chmodSync(join(target,'company-knowledge.sqlite'),0o600);}finally{library.close();}
   }
+  if(existsSync(join(config.dataDir,'intelligence.sqlite'))){
+    const intelligence=new DatabaseSync(join(config.dataDir,'intelligence.sqlite'),{readOnly:true});
+    try{
+      await backup(intelligence,join(target,'intelligence.sqlite'));chmodSync(join(target,'intelligence.sqlite'),0o600);
+      mkdirSync(join(target,'intelligence-uploads'),{recursive:true,mode:0o700});
+      const snapshot=new DatabaseSync(join(target,'intelligence.sqlite'),{readOnly:true});
+      try{for(const image of snapshot.prepare('SELECT path FROM intel_images').all()){
+        if(!/^intelligence-uploads\/[a-f0-9-]{36}\.(png|jpg|webp)$/.test(image.path))throw new Error('智库截图路径无效，备份已停止。');
+        copyFileSync(join(config.dataDir,image.path),join(target,image.path));
+      }}finally{snapshot.close();}
+    }finally{intelligence.close();}
+  }
   const snapshot=new DatabaseSync(join(target,'crm.sqlite'),{readOnly:true});
   try{
     for(const image of snapshot.prepare('SELECT path FROM screenshots').all())copyFileSync(join(config.dataDir,image.path),join(target,image.path));
   }finally{snapshot.close();}
-  writeFileSync(join(target,'RESTORE.txt'),'停止应用；将本目录的 crm.sqlite、company-knowledge.sqlite（如有）和 uploads/ 复制到 DATA_DIR；不要保留对应数据库旧的 -wal 或 -shm 文件；重新启动。千问Key不包含在备份里，恢复到新服务器后重新填写。备份可能包含客户和公司资料，请妥善保存。\n');
+  writeFileSync(join(target,'RESTORE.txt'),'停止应用；将本目录的 crm.sqlite、company-knowledge.sqlite（如有）、intelligence.sqlite（如有）、uploads/ 和 intelligence-uploads/（如有）复制到 DATA_DIR；不要保留对应数据库旧的 -wal 或 -shm 文件；重新启动。千问Key不包含在备份里，恢复到新服务器后重新填写。备份可能包含客户、微信群和公司资料，请妥善保存。\n');
   console.log(`备份完成：${target}`);
 }finally{source.close();}

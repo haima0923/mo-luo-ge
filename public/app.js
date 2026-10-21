@@ -1,3 +1,4 @@
+import { initIntelligence } from './intelligence-ui.js';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const state = { customers:[], selected:null, shipment:null, detail:null, files:[], draft:null, replyStyle:'friendly', busy:false, status:{} };
@@ -222,7 +223,8 @@ function renderReplies(latest){
   $('replies').hidden=false;
   const reply=replies.find(r=>r.style===state.replyStyle)||replies[0];
   const tabs=`${replies.map(r=>`<button data-reply="${r.style}" class="${!custom&&reply.style===r.style?'active':''}">${styles[r.style]}</button>`).join('')}<button data-reply="custom" class="${custom?'active':''}">自定义回复</button>`;
-  $('replies').innerHTML=`<div class="reply-head"><div class="reply-heading"><h3>AI 回复参考 ${latest?.demo?'· 固定演示':''}</h3><button type="button" id="reference-library-btn" class="button quiet reference-library-button">数据库参考</button></div><div class="reply-tabs">${tabs}<button type="button" id="toggle-replies" class="reply-collapse" aria-controls="reply-content"></button></div></div><div id="reply-content"></div>`;
+  $('replies').innerHTML=`<div class="reply-head"><div class="reply-heading"><h3>AI 回复参考 ${latest?.demo?'· 固定演示':''}</h3><button type="button" id="reference-library-btn" class="button quiet reference-library-button">数据库参考</button></div><div class="reply-tabs">${tabs}<button type="button" id="toggle-replies" class="reply-collapse" aria-controls="reply-content"></button></div></div><div id="reply-content"></div><section id="intelligence-matches" class="intelligence-matches" aria-label="智库历史询价参考"></section>`;
+  intelUI.renderMatches(latest);
   $('reference-library-btn').onclick=referenceLibrary;
   function applyCollapse(){
     $('reply-content').hidden=repliesCollapsed;$('replies').classList.toggle('is-collapsed',repliesCollapsed);
@@ -316,6 +318,7 @@ async function demo(){try{const d=await post('/api/demo',{});openReview(d);await
 $('demo-btn').onclick=demo;
 function openReview(draft){
   state.draft=draft;
+  if(!state.selected||draft.customer_id===state.selected)intelUI.renderMatches(draft.analysis);
   if($('memory-dialog').open&&memoryView.detail&&draft.customer_id===memoryView.id)renderProfile();
   const a=draft.analysis;
   const options=draft.demo?`<option value="new">新建演示客户</option>`:draft.customer_id?`<option value="${draft.customer_id}">${esc(state.customers.find(c=>c.id===draft.customer_id)?.name||'当前客户')}</option>`:`<option value="">请确认这是谁的聊天</option><option value="new">新建客户档案</option>${state.customers.map(c=>`<option value="${c.id}">${esc(c.name)} ${esc(c.phone)}</option>`).join('')}`;
@@ -409,4 +412,5 @@ async function init(){
   try{state.status=await api('/api/status');renderModelStatus();$('logout-btn').hidden=!state.status.password_required;if(!state.status.authenticated){if(!$('login-dialog').open)$('login-dialog').showModal();return;}await refreshCustomers();await refreshDrafts();renderReplies(state.detail?.latest);if(location.hash==='#settings')await settings();}
   catch(e){toast(e.message,true);}
 }
+const intelUI=initIntelligence({api,post,toast,showSmall,copy,getState:()=>state});
 await init();

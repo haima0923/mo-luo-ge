@@ -32,8 +32,10 @@ class UpgradeTest(unittest.TestCase):
         (self.config / 'app.env').write_text('APP_PASSWORD=synthetic-test-only\n')
         self.data = self.root / 'customer-data'
         self.data.mkdir()
-        for name in ('crm.sqlite', 'company-knowledge.sqlite', 'qwen-settings.json'):
+        for name in ('crm.sqlite', 'company-knowledge.sqlite', 'intelligence.sqlite', 'qwen-settings.json'):
             (self.data / name).write_text('synthetic-preserved-content')
+        (self.data / 'intelligence-uploads').mkdir()
+        (self.data / 'intelligence-uploads/source.png').write_text('synthetic-preserved-content')
         for name, value in {'BASE': self.base, 'CONFIG': self.config, 'DATA': self.data,
                             'SERVICE_UNIT': self.unit, 'APPLICATION': ROOT}.items():
             patcher = patch.object(installer, name, value)
@@ -47,21 +49,22 @@ class UpgradeTest(unittest.TestCase):
 
     def check_private_files(self):
         self.assertEqual((self.config / 'app.env').read_text(), 'APP_PASSWORD=synthetic-test-only\n')
-        for item in self.data.iterdir():
-            self.assertEqual(item.read_text(), 'synthetic-preserved-content')
+        for item in self.data.rglob("*"):
+            if item.is_file():
+                self.assertEqual(item.read_text(), 'synthetic-preserved-content')
 
-    def test_upgrade_025_activates_026_and_preserves_data(self):
-        with patch.object(installer, 'app_status', return_value={'version': '0.2.5'}), \
+    def test_upgrade_026_activates_030_and_preserves_data(self):
+        with patch.object(installer, 'app_status', return_value={'version': '0.2.6'}), \
              patch.object(installer, 'website_status', return_value=(200, None)), \
              patch.object(installer, 'backup') as backup, \
              patch.object(installer, 'run', side_effect=self.record_command), \
-             patch.object(installer, 'wait_for_app', return_value={'version': '0.2.6'}), \
+             patch.object(installer, 'wait_for_app', return_value={'version': '0.3.0'}), \
              patch.object(installer, 'check_navigation') as navigation:
             installer.upgrade()
         release = (self.base / 'current').resolve()
         self.assertNotEqual(release, self.old)
-        self.assertTrue(release.name.startswith('v0.2.6-'))
-        self.assertEqual(json.loads((release / 'package.json').read_text())['version'], '0.2.6')
+        self.assertTrue(release.name.startswith('v0.3.0-'))
+        self.assertEqual(json.loads((release / 'package.json').read_text())['version'], '0.3.0')
         self.assertEqual((release / 'lib/qwen.mjs').read_bytes(), (ROOT / 'lib/qwen.mjs').read_bytes())
         self.assertFalse((release / '.git').exists())
         self.assertFalse((release / 'data').exists())
@@ -74,7 +77,7 @@ class UpgradeTest(unittest.TestCase):
         self.check_private_files()
 
     def test_failed_health_check_restores_previous_release_and_service(self):
-        with patch.object(installer, 'app_status', return_value={'version': '0.2.5'}), \
+        with patch.object(installer, 'app_status', return_value={'version': '0.2.6'}), \
              patch.object(installer, 'website_status', return_value=(200, None)), \
              patch.object(installer, 'backup'), \
              patch.object(installer, 'run', side_effect=self.record_command), \
@@ -86,8 +89,8 @@ class UpgradeTest(unittest.TestCase):
         self.assertEqual(self.calls.count(['systemctl', 'restart', 'morocco-ai-crm']), 2)
         self.check_private_files()
 
-    def test_026_is_idempotent_without_backup_or_restart(self):
-        with patch.object(installer, 'app_status', return_value={'version': '0.2.6'}), \
+    def test_030_is_idempotent_without_backup_or_restart(self):
+        with patch.object(installer, 'app_status', return_value={'version': '0.3.0'}), \
              patch.object(installer, 'run') as run, patch.object(installer, 'backup') as backup:
             installer.upgrade()
         run.assert_not_called()
@@ -96,7 +99,7 @@ class UpgradeTest(unittest.TestCase):
         self.check_private_files()
 
     def test_status_accepts_old_and_new_versions_but_requires_password(self):
-        for version in ('0.2.4', '0.2.5', '0.2.6'):
+        for version in ('0.2.4', '0.2.5', '0.2.6', '0.3.0'):
             with self.subTest(version=version), patch.object(installer.http.client, 'HTTPConnection') as connection:
                 result = connection.return_value.getresponse.return_value
                 result.status = 200

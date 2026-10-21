@@ -130,3 +130,75 @@
   .memory-dialog .profile-content{padding:16px}
   .memory-scope{padding:12px 16px}
 }
+
+/* 群聊智库及翻译下方历史参考 */
+body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
+.topbar,.mobile-nav{flex-shrink:0}
+.app-shell{height:auto;flex:1;min-height:0;width:100%}
+.intelligence-dialog{width:min(1200px,96vw);height:92dvh;max-height:92dvh}
+.intelligence-dialog[open]{display:flex;flex-direction:column}
+.intelligence-dialog .dialog-head,.intel-controls,.intel-pager{flex-shrink:0}
+.intel-controls{padding:16px 24px;border-bottom:1px solid var(--line)}
+.intel-toolbar,.intel-tabs,.intel-actions,.intel-message-head,.intel-card-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.intel-toolbar{margin-bottom:10px}
+.intel-toolbar select,.intel-toolbar input,.intel-match-form input{min-width:0;flex:1;border:1px solid var(--line);border-radius:7px;padding:9px;background:#fff;font-size:12px}
+.intel-toolbar select{max-width:360px}
+.intel-toolbar .button,.intel-actions .button{font-size:11px;padding:8px 11px}
+.intel-note{font-size:11px;line-height:1.85;color:var(--muted);margin:8px 0;overflow-wrap:anywhere}
+.intel-tabs button{border:1px solid var(--line);border-radius:6px;background:white;color:var(--muted);padding:8px 12px;font-size:12px}
+.intel-tabs button.active{background:var(--green-pale);color:var(--green);border-color:#bcd9c8}
+.intel-list{overflow:auto;flex:1;min-height:0;padding:8px 24px 24px}
+.intel-pager{padding:12px 24px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:11px;color:var(--muted)}
+.intel-card,.intel-message,.intel-editor,.intel-linked{border:1px solid var(--line);border-radius:9px;padding:15px;margin:12px 0;background:#fbfcfa;overflow-wrap:anywhere}
+.intel-card-title{justify-content:space-between}
+.intel-card-title strong{font-size:14px}
+.intel-card>p{font-size:12px;line-height:1.8;white-space:pre-wrap}
+.intel-status{font-size:10px;border-radius:5px;padding:5px 7px}
+.intel-status.unquoted{background:#fff0d8;color:#8b5a19}
+.intel-status.quoted{background:var(--green-pale);color:var(--green)}
+.intel-excerpt{color:#65766a;max-height:100px;overflow:auto}
+.intel-offer{padding:11px;background:#eaf3ed;border-radius:7px;margin:10px 0}
+.intel-offer strong{font-size:12px;color:var(--green);white-space:pre-wrap}
+.intel-offer p{font-size:11px;line-height:1.85;white-space:pre-wrap;margin-top:5px}
+.intel-message-head strong{font-size:12px}
+.intel-message-head span{font-size:10px;color:var(--muted)}
+.intel-original{font-size:13px;white-space:pre-wrap;line-height:1.9;margin:10px 0;overflow-wrap:anywhere}
+.intel-chinese{font-size:12px;line-height:1.8;white-space:pre-wrap;color:#587261;padding:10px;border-top:1px solid var(--line)}
+.intel-actions{justify-content:flex-end;margin-top:10px}
+.intel-import-dialog{width:min(650px,96vw);max-height:92dvh}
+.intel-review-dialog{width:min(1100px,96vw);max-height:94dvh}
+.intel-import-dialog form,.intel-review-dialog form{display:flex;flex-direction:column;max-height:92dvh}
+.intel-import-dialog label,.intel-editor label{display:block;font-size:12px;margin:12px 0}
+.intel-import-dialog input:not([type=file]),.intel-import-dialog textarea,.intel-editor input:not([type=checkbox]),.intel-editor textarea{width:100%;min-width:0;border:1px solid var(--line);border-radius:7px;padding:9px;margin-top:6px;font-size:12px;background:#fff}
+.intel-drop{padding:16px;border:1px dashed #b2cebb;border-radius:8px;margin:15px 0}
+.intel-drop>span{display:block;color:var(--muted);font-size:11px;line-height:1.8}
+.intel-upload-file{padding:6px;background:var(--green-pale);border-radius:6px;white-space:nowrap;font-size:11px}
+.intel-detail-dialog{width:min(900px,96vw);max-height:94dvh}
+.intel-detail-dialog>.dialog-body{max-height:72dvh}
+.intel-detail-dialog h3,.intel-review-dialog h3{font-size:14px;margin:14px 0}
+.intel-product-row,.intel-offer-row{border-left:3px solid #bfd9c7;padding:5px 12px;margin:14px 0;background:#f2f7f2}
+.intel-offer-row{border-color:#c9b47f;background:#fbf8f0}
+.intel-check,.intel-link-suggestion{display:flex!important;align-items:flex-start;gap:9px;font-size:12px;line-height:1.9;margin:15px 0}
+.intel-check input,.intel-link-suggestion input{width:16px;height:16px;flex-shrink:0;margin-top:4px;accent-color:var(--green)}
+.intelligence-matches{border-top:1px solid var(--line);padding-top:18px;margin-top:24px}
+.intelligence-matches .memory-section-head{align-items:flex-start}
+.intelligence-matches h3{font-size:13px}
+.intelligence-matches .intel-card{padding:11px}
+.intelligence-matches .intel-card-title strong{font-size:12px}
+.intelligence-matches .intel-status{font-size:9px}
+.intel-match-form{display:flex;gap:6px;margin:10px 0}
+.intel-match-form .button{font-size:10px;padding:7px}
+@media(max-width:900px){
+ .topbar{height:auto;min-height:105px;padding:12px 15px;flex-wrap:wrap;gap:10px}
+ .top-actions{width:100%;justify-content:flex-end;flex-wrap:wrap;gap:5px}
+ .top-actions .button{font-size:10px;padding:7px 8px}
+ .app-shell{height:auto}
+ .intel-controls{padding:12px}
+ .intel-toolbar select,.intel-toolbar input{min-width:140px;max-width:none}
+ .intel-list{padding:8px 12px 15px}
+ .intel-pager{padding:10px}
+ .intel-message,.intel-editor,.intel-card{padding:11px}
+ .intel-review-dialog .dialog-foot span{max-width:52%}
+ .intel-review-dialog .review-grid{grid-template-columns:1fr}
+}
+#intel-source-image{max-width:100%;height:auto;display:block;margin:auto}
