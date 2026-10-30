@@ -118,3 +118,5 @@
 消息字段为sender、original、chinese、visible_date、visible_time、mentions[]、products[{name,specs,keywords}]、offers[{product,price,terms}]和uncertain。报价价格必须照抄该条原文，mentions必须在原文中可见。每种products单独形成询价；普通回复不会清除待报价状态。身份不明的关联计为needs_review。links为本批reply_index与新inquiry_index或同群历史inquiry_id关联；offer_index指回复中的具体报价，必须有效。AI建议不自动归档，commit仅写入人工确认的links。
 
 长批次推荐在analyze请求中传入 `async:true`，立即返回202和job_id；`GET /api/intelligence/jobs/:id`（同样需登录）返回running/completed/failed。completed含已持久保存的draft_id，failed仅包含清理过的错误。进度状态保留在当前服务进程，完成的待审核草稿独立持久保存；如服务重启后进度不可用，先检查待审核列表。同步调用仍返回201草稿，兼容现有调用方。
+
+v0.3.1：分析和审核归档的facts上限为400。图片分析结果兼容可选null、语言数组和按风格组织的回复对象；原文/中文、枚举和来源仍严格校验。结构错误最多修复一次，错误消息携带安全的字段路径，不回显模型原文或Key。空识别结果返回422，需裁剪清晰聊天区域或输入原文。若仅公共资料回复失败，analyze仍返回201已识别草稿，analysis.replies为空，reference_reply_error及warnings说明原因；人工归档后调用现有replies/refresh重新生成，成功清除标志和相应警告。无法验证的回复不允许复制，不写入客户事实。

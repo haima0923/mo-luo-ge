@@ -15,6 +15,8 @@ try{
   const page=await browser.newPage({viewport:{width:1440,height:960},acceptDownloads:true});
   await page.context().grantPermissions(['clipboard-read','clipboard-write'],{origin});
   page.on('pageerror',e=>errors.push(e.message));
+  // 在后面的模型模拟用例启用前，不发起真实记忆补译，避免缓存干扰异步测试。
+  await page.route('**/api/status',async route=>{const response=await route.fetch();await route.fulfill({response,json:{...await response.json(),qwen_configured:false}});});
   const call=async(path,body)=>{
     const result=await page.request.fetch(origin+path,{method:body===undefined?'GET':'POST',...(body===undefined?{}:{data:body})});
     assert.ok(result.ok(),`${path}: ${result.status()} ${await result.text()}`);

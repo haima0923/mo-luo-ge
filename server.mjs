@@ -4,7 +4,7 @@ import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHmac, timingSafeEqual, createHash, randomUUID } from 'node:crypto';
 import { Store } from './lib/store.mjs';
-import { HttpError, object, str, decodeImages, validateMessages } from './lib/core.mjs';
+import { HttpError, object, str, decodeImages, validateMessages,MAX_ANALYSIS_FACTS } from './lib/core.mjs';
 import { createQwen, createReplyTranslator, createMemoryTranslator, createReferenceReplies, TRANSLATION_LANGUAGES } from './lib/qwen.mjs';
 import { memoryFactKey } from './lib/memory.mjs';
 import { QwenSettings } from './lib/settings.mjs';
@@ -55,8 +55,14 @@ export function createApp(config = readConfig(), options = {}) {
     const revision=store.library.revision();
     const text=[analysis.summary,analysis.intent,...analysis.messages.map(message=>message.original+' '+message.chinese)].join(' ');
     const entries=store.library.select(text,context);
-    const replies=entries.length||force?await createReferenceReplies(settings.config(),options.qwenFetcher)({analysis,context,references:entries}):analysis.replies.map(reply=>({...reply,reference_ids:[]}));
-    return {...analysis,replies,...referenceMetadata(revision,entries)};
+    try{
+      const replies=entries.length||force?await createReferenceReplies(settings.config(),options.qwenFetcher)({analysis,context,references:entries}):analysis.replies.map(reply=>({...reply,reference_ids:[]}));
+      return {...analysis,replies,reference_reply_error:'',...referenceMetadata(revision,entries)};
+    }catch(error){
+      if(force||!(error instanceof HttpError))throw error;
+      const message='图片消息已识别，但资料库参考回复暂未生成。可先审核归档消息，再点击“按资料库更新回复”重试。';
+      return {...analysis,replies:[],reference_reply_error:message,warnings:[message,...analysis.warnings],...referenceMetadata(revision,entries)};
+    }
   }
   const memoryTranslations = new Map(), translatingCustomers = new Set();
   function memoryDetails(id, query = '', shipmentId = null) {
@@ -92,7 +98,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.0'
+        model: settings.view().model, version: '0.3.1'
       });
       if (method === 'POST' && path === '/api/login') {
         const ip = req.socket.remoteAddress || 'local', entry = attempts.get(ip) || { count: 0, until: 0 };
@@ -310,7 +316,7 @@ export function createApp(config = readConfig(), options = {}) {
         const b = await readJson(req), draft = store.draft(match[1]), messages = validateMessages(b.messages);
         if (messages.length !== draft.analysis.messages.length) throw new HttpError(400, '消息数量与草稿不一致，请重新分析。');
         if (messages.some(m=>m.speaker==='unknown')) throw new HttpError(400, '请先确认所有消息的发送方。');
-        if (!Array.isArray(b.accepted_facts) || b.accepted_facts.length > 40) throw new HttpError(400, '记忆审核数据无效。');
+        if (!Array.isArray(b.accepted_facts) || b.accepted_facts.length > MAX_ANALYSIS_FACTS) throw new HttpError(400, '记忆审核数据无效。');
         const indices = new Set();
         const acceptedFacts = b.accepted_facts.map(f=>{
           if (!object(f) || !Number.isInteger(f.index) || !draft.analysis.facts[f.index] || indices.has(f.index)) throw new HttpError(400, '记忆来源无效或重复。');

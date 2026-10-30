@@ -226,6 +226,7 @@ function renderReplies(latest){
   $('replies').innerHTML=`<div class="reply-head"><div class="reply-heading"><h3>AI 回复参考 ${latest?.demo?'· 固定演示':''}</h3><button type="button" id="reference-library-btn" class="button quiet reference-library-button">数据库参考</button></div><div class="reply-tabs">${tabs}<button type="button" id="toggle-replies" class="reply-collapse" aria-controls="reply-content"></button></div></div><div id="reply-content"></div><section id="intelligence-matches" class="intelligence-matches" aria-label="智库历史询价参考"></section>`;
   intelUI.renderMatches(latest);
   $('reference-library-btn').onclick=referenceLibrary;
+  if(latest?.reference_reply_error&&!replies.length){$('reply-content').insertAdjacentHTML('beforebegin',`<div class="warning-box">${esc(latest.reference_reply_error)}<br><button type="button" id="refresh-reference-replies" class="button quiet">按资料库更新回复</button></div>`);bindReferenceRefresh();}
   function applyCollapse(){
     $('reply-content').hidden=repliesCollapsed;$('replies').classList.toggle('is-collapsed',repliesCollapsed);
     const button=$('toggle-replies'),label=repliesCollapsed?'展开 AI 回复参考':'收起 AI 回复参考';
@@ -310,9 +311,9 @@ function busy(value){state.busy=value;$('analyze-btn').disabled=value;$('analyze
 $('analyze-btn').onclick=async()=>{
   if(state.busy)return;const text=$('message-input').value.trim();if(!text && !state.files.length)return toast('先上传截图或输入原文',true);
   if(!state.status.qwen_configured){settings();return;}
-  const customer_id=state.selected,shipment_id=state.shipment;busy(true);
+  const customer_id=state.selected,shipment_id=state.shipment;busy(true);$('analysis-error').hidden=true;$('analysis-error').textContent='';
   try{const images=await Promise.all(state.files.map(x=>fileData(x.file)));const draft=await post('/api/analyze',{text,images,customer_id,shipment_id});openReview(draft);await refreshDrafts();}
-  catch(e){toast(e.message,true);}finally{busy(false);}
+  catch(e){$('analysis-error').textContent=e.message;$('analysis-error').hidden=false;toast(e.message,true);}finally{busy(false);}
 };
 async function demo(){try{const d=await post('/api/demo',{});openReview(d);await refreshDrafts();}catch(e){toast(e.message,true);}}
 $('demo-btn').onclick=demo;

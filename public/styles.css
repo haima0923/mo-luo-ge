@@ -202,3 +202,5 @@ body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
  .intel-review-dialog .review-grid{grid-template-columns:1fr}
 }
 #intel-source-image{max-width:100%;height:auto;display:block;margin:auto}
+
+.analysis-error{font-size:12px;line-height:1.8;color:var(--red);padding:8px 10px;background:#fff2ef;border-radius:7px;margin:7px 0;overflow-wrap:anywhere}
