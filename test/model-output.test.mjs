@@ -133,3 +133,54 @@ test('只修复回复字段时也固定已验证的客户事实，模型不能�
   const result=await createQwen(config,async()=>{calls++;return output(calls===1?raw:{...DEMO,facts:[]});})(input);
   assert.equal(calls,2);assert.deepEqual(result.messages,DEMO.messages);assert.deepEqual(result.facts,DEMO.facts);
 });
+
+test('复现product_terms红字：可选检索词的对象、空项或超长项不阻断图片识别，也不触发重试',async()=>{
+  const cases=[
+    {value:[{name:'鞋子',aliases:['shoes','chaussures'],specs:'42码'}],terms:['鞋子','shoes','chaussures','42码']},
+    {value:['家具',null,'',42,{unexpected:'不应成为检索词'},'x'.repeat(121),'furniture'],terms:['家具','furniture'],warning:true},
+    {value:[null,'',{},['不能猜测嵌套数组'],false],terms:[],warning:true},
+    {value:'shoes',terms:['shoes']},
+    {value:{product:'鞋子',keywords:'shoes'},terms:['鞋子','shoes']},
+    {value:42,terms:[],warning:true},
+    {value:null,terms:[]},
+    {value:[' shoes ','shoes','鞋子'],terms:['shoes','鞋子']}
+  ];
+  for(const {value,terms,warning} of cases){
+    let calls=0;
+    const raw={...structuredClone(DEMO),product_terms:value};
+    const result=await createQwen(config,async()=>{calls++;return output(raw);})(input);
+    assert.equal(calls,1,'可选检索词不应浪费一次模型修复调用');
+    assert.deepEqual(result.product_terms,terms);assert.deepEqual(result.messages,DEMO.messages);
+    assert.deepEqual(result.facts,DEMO.facts);assert.deepEqual(result.replies,validateAnalysis(DEMO).replies);
+    if(warning)assert.ok(result.warnings.some(w=>w.includes('产品检索词')));
+  }
+  const bounded=validateAnalysis({...DEMO,product_terms:Array.from({length:30},(_,i)=>`产品${i}`)});
+  assert.equal(bounded.product_terms.length,16);
+  assert.throws(()=>validateAnalysis({...DEMO,messages:[{...DEMO.messages[0],chinese:null}],product_terms:[null]}),e=>e.field==='messages[0].chinese');
+});
+
+test('异常检索词仍可生成带原图的待审核草稿、人工归档并查询智库；不污染客户事实',async t=>{
+  let calls=0;
+  const a=await app(t,{qwenFetcher:async()=>{calls++;return output({...DEMO,product_terms:[{unexpected:'INVALID-RETRIEVAL-ONLY'},null]});}});
+  const customer=a.store.createCustomer({name:'检索词回归客户'});
+  const analyzed=await a.call('/api/analyze',{customer_id:customer.id,images:[image]});
+  assert.equal(analyzed.status,201);assert.equal(calls,1);assert.equal(analyzed.body.screenshots.length,1);
+  assert.deepEqual(analyzed.body.analysis.product_terms,[]);assert.deepEqual(analyzed.body.analysis.facts,DEMO.facts);
+  assert.equal(a.store.detail(customer.id).messages.length,0);
+  const commit=await a.call(`/api/drafts/${analyzed.body.id}/commit`,{customer_id:customer.id,messages:analyzed.body.analysis.messages,accepted_facts:[]});
+  assert.equal(commit.status,200);assert.equal(a.store.detail(customer.id).messages.length,DEMO.messages.length);
+  const lookup=await a.call(`/api/customers/${customer.id}/intelligence`);
+  assert.equal(lookup.status,200);assert.equal(calls,1);assert.ok(!JSON.stringify(lookup.body).includes('INVALID-RETRIEVAL-ONLY'));
+});
+
+test('多图汇总的产品检索词格式错误不会丢弃已逐张识别的聊天',async()=>{
+  let photos=0,metadata=0;
+  const analyze=createQwen(config,async(url,options)=>{
+    const request=JSON.parse(options.body);
+    if(Array.isArray(request.messages[1].content))return output({messages:[{...DEMO.messages[0],original:'图片'+(++photos)}],warnings:[]});
+    metadata++;return output({...DEMO,facts:[],product_terms:[{},null,'家具']});
+  });
+  const result=await analyze({...input,images:[image,image]});
+  assert.equal(photos,2);assert.equal(metadata,1);assert.deepEqual(result.messages.map(m=>m.original),['图片1','图片2']);
+  assert.deepEqual(result.product_terms,['家具']);assert.ok(result.warnings.some(w=>w.includes('产品检索词')));
+});

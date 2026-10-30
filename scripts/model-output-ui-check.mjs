@@ -13,6 +13,7 @@ const {server,store}=createApp({host:'127.0.0.1',port:0,password:'',origin:'',da
   const request=JSON.parse(options.body),source=structuredClone(DEMO);
   if(Array.isArray(request.messages[1].content)){
     if(mode==='broken-analysis')source.messages[0].chinese=null;
+    else source.product_terms=[null,{},'家具']; // 复现用户product_terms错误，必须仍可审核全部聊天。
     return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(source)}}]}));
   }
   return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify({replies:source.replies.map(r=>({...r,chinese:mode==='healthy'?r.chinese:null,reference_ids:[referenceId]}))})}}]}));
@@ -33,6 +34,8 @@ try{
   mode='reference-broken';referenceId=store.library.save({title:'合成公司资料',category:'公司介绍',content:'合成测试，仅说明范围，不代表报价。',scope:''}).id;
   await page.locator('#analyze-btn').click();await page.locator('#review-dialog').waitFor();assert.equal(await page.locator('#analysis-error').isVisible(),false);
   assert.equal(await page.locator('[data-review-index]').count(),3);assert.match(await page.locator('#review-body').textContent(),/资料库参考回复暂未生成/);
+  assert.match(await page.locator('#review-body').textContent(),/产品检索词/);
+  assert.deepEqual(store.draft(store.readyDrafts()[0].id).analysis.product_terms,['家具']);
   await page.locator('#commit-btn').click();await page.locator('#review-dialog').waitFor({state:'hidden'});await page.locator('.message-row').first().waitFor();
   await page.locator('.mobile-nav [data-panel=replies]').click();await page.locator('#refresh-reference-replies').waitFor();
   assert.equal(await page.locator('#copy-reply').count(),0);assert.equal(store.detail(customer.id).messages.length,3);
@@ -41,5 +44,5 @@ try{
   assert.ok(!(await page.locator('#replies').textContent()).includes('资料库参考回复暂未生成'));
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.setViewportSize({width:1440,height:960});assert.equal(await page.locator('#copy-reply').isVisible(),true);assert.deepEqual(errors,[]);
-  console.log('字段错误持续提示、保留图片、资料库失败草稿审核归档、重试回复清错及电脑/手机布局通过；使用模拟响应。');
+  console.log('必需字段错误提示、异常product_terms不阻断图片审核归档、资料库失败恢复及电脑/手机布局通过；使用模拟响应。');
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));store.close();rmSync(dataDir,{recursive:true,force:true});}

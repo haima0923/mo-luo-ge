@@ -120,3 +120,5 @@
 长批次推荐在analyze请求中传入 `async:true`，立即返回202和job_id；`GET /api/intelligence/jobs/:id`（同样需登录）返回running/completed/failed。completed含已持久保存的draft_id，failed仅包含清理过的错误。进度状态保留在当前服务进程，完成的待审核草稿独立持久保存；如服务重启后进度不可用，先检查待审核列表。同步调用仍返回201草稿，兼容现有调用方。
 
 v0.3.1：分析和审核归档的facts上限为400。图片分析结果兼容可选null、语言数组和按风格组织的回复对象；原文/中文、枚举和来源仍严格校验。结构错误最多修复一次，错误消息携带安全的字段路径，不回显模型原文或Key。空识别结果返回422，需裁剪清晰聊天区域或输入原文。若仅公共资料回复失败，analyze仍返回201已识别草稿，analysis.replies为空，reference_reply_error及warnings说明原因；人工归档后调用现有replies/refresh重新生成，成功清除标志和相应警告。无法验证的回复不允许复制，不写入客户事实。
+
+v0.3.2：`analysis.product_terms` 为可选检索提示，不再作为整批分析失败的条件。接受字符串、字符串数组及明确的name/product/term/aliases/specs/keywords字段对象；仅保留去重后的非空字符串（每项最多120字，最多16项）。异常项忽略并加入安全warnings，不调用结构修复，不回显异常值；消息、翻译和事实仍严格验证，审核归档和客户隔离不变。GET客户智库检索在没有有效检索词时继续使用当前范围的货物事实/客户聊天。
