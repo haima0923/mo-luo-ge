@@ -125,8 +125,8 @@ v0.3.2：`analysis.product_terms` 为可选检索提示，不再作为整批分�
 
 v0.3.3：多图转录合并支持相邻尾部/头部的单条长消息重叠（原文至少24个字母/数字，或12个汉字，身份明确、无时间冲突），同时兼容有限排版/时间格式差异；不做编辑距离模糊匹配。草稿warnings提示合并数量，facts.message_index及智库询价/回复索引基于合并后的消息表，原图来源保留。分次归档的单条重叠仅对截图开放，需双方完整日期时间；归档响应仍为inserted/skipped，作用域保持客户+shipment或group。旧收据、签名与数据库结构兼容；实质校对的消息不能靠旧收据覆盖。已归档重复消息不批量删除。
 
-## 经验推荐（v0.3.4）
+## 智能修改回复（v0.3.5）
 
-登录后 `POST /api/customers/:id/replies/experience`，输入 `{draft_id,shipment_id?}` 或 `action:"generate"`。仅用于当前客户当前票最新的已归档、非演示且未失效聊天，和其他模型调用共用并发限制。返回带 `experience_reply` 的latest对象，包含text/chinese/language/reason/follow_up、needs_confirmation、experience_ids/reference_ids、引用的固定统计/本客户示例/公共资料、学习条数及版本。参考模式最多16项、当前客户同票示例最多6组；共享模式仅有固定标签和计数，不含其他客户原文。来源ID必须属于本次实际提供的候选，否则502且不存结果。
+v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登录后 `POST /api/customers/:id/replies/edit`：输入 `{draft_id,shipment_id?,style,instruction,base_edit_id?,use_original?}`。style只能为professional/friendly/short，instruction为1—3000字。服务端读取真实的当前回复作为修改基准，不接受客户端伪造原文；base_edit_id必须等于该方案最新修订ID，尚无修订时为null。默认基于最新修订继续修改，use_original=true明确从原始回复开始。返回latest对象，`reply_edits[style]`包含最多10条记录（text/chinese/language/warnings、修改要求、版本及引用来源），原replies/messages/facts/quotes保持不变。
 
-推荐保存在原draft.analysis内，不改变messages、facts、quotes或三种普通replies。生成期间聊天、历史或资料变化返回409，不保存旧结果；GET客户详情通过experience_stale标明旧推荐失效。复制使用同一端点，输入 `{action:"copy",draft_id,shipment_id?,generation_id}`，服务端校验最新聊天、生成ID、经验历史、客户上下文和公共资料版本，成功仅返回 `{text}`；过时返回409，不调用模型。每次生成/重新生成会产生额外模型调用，失败不自动循环重试。没有历史经验的结果通过learned_replies=0明确提示一般建议。仅使用已有SQLite字段，无新增数据库迁移。
+复制修订版使用同一端点，输入 `{action:"copy",draft_id,shipment_id?,style,edit_id}`，版本有效返回 `{text}`，不调用模型。过时聊天、客户上下文、公共资料、原回复、修订ID或生成期间并发变更返回409；失败不保存部分结果。GET客户详情的每条修订包含stale标记。来源ID只允许本次提供的有效公共条目，错误模型输出返回502且不泄露响应正文或密钥。可选null数组兼容，原文和中文仍必需。只调用本客户本票上下文，不做跨客户学习，无数据库结构变更。
