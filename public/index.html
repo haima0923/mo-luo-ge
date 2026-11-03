@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content">
   <meta name="theme-color" content="#145c47"><title>Morocco AI CRM · 摩洛哥客户助手</title>
-  <link rel="stylesheet" href="/styles.css"><script type="module" src="/app.js"></script>
+  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/layout.css"><script type="module" src="/app.js"></script>
 </head>
 <body data-panel="chat">
   <header class="topbar">
@@ -20,10 +20,12 @@
       <div class="sidebar-bottom"><button id="recover-btn" class="button quiet full">待审核草稿 <span id="draft-count">0</span></button><p>本机保存 · 回复由你确认后复制</p></div>
     </aside>
     <section class="conversation" aria-label="客户聊天">
+      <div class="conversation-tools">
       <header class="conversation-head"><div class="head-person"><div id="active-avatar" class="avatar">✦</div><div><h1 id="active-name">你的摩洛哥客户工作台</h1><p id="active-meta">读懂混合语言，接续每一次交流</p></div></div><button id="edit-customer" class="button quiet" hidden>编辑客户</button></header>
       <div id="demo-notice" class="demo-notice" hidden>固定演示档案 · 不代表真实客户或千问识别结果</div>
       <div id="shipment-bar" class="shipment-bar" hidden><label for="shipment-select">运输需求</label><select id="shipment-select" aria-label="当前运输需求"></select><button id="new-shipment" class="button quiet">＋ 新建</button></div>
       <div id="chat-search-wrap" class="chat-search-wrap" hidden><input id="chat-search" placeholder="搜索这位客户的原文或中文翻译" aria-label="搜索聊天记录"></div>
+      </div>
       <div id="chat-area" class="chat-area">
         <div class="welcome"><div class="eyebrow">CHINA → MOROCCO</div><h2>聊天看得懂，<br>客户记得住。</h2><p>把英语、法语和 Darija 混合聊天，<br>变成清楚的中文与有来源的客户记忆。</p><div class="workflow"><span><b>01</b> 上传截图</span><span><b>02</b> 确认翻译</span><span><b>03</b> 保存记忆</span></div><button id="demo-btn" class="button primary">体验固定示例 ↗</button><small>无需密钥 · 演示数据会先进入审核草稿</small></div>
       </div>

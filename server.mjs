@@ -101,7 +101,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.5'
+        model: settings.view().model, version: '0.3.6'
       });
       if (method === 'POST' && path === '/api/login') {
         const ip = req.socket.remoteAddress || 'local', entry = attempts.get(ip) || { count: 0, until: 0 };
@@ -369,7 +369,7 @@ export function createApp(config = readConfig(), options = {}) {
         res.writeHead(200, { 'Content-Type':image.mime,'Cache-Control':'no-store','Content-Disposition':'inline' });
         return res.end(readFileSync(join(config.dataDir,image.path)));
       }
-      const staticFiles = { '/':'index.html', '/app.js':'app.js', '/intelligence-ui.js':'intelligence-ui.js', '/styles.css':'styles.css' };
+      const staticFiles = { '/':'index.html', '/app.js':'app.js', '/intelligence-ui.js':'intelligence-ui.js', '/styles.css':'styles.css', '/layout.css':'layout.css' };
       if (method === 'GET' && staticFiles[path]) {
         const file = staticFiles[path];
         res.writeHead(200,{ 'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8','Cache-Control':'no-cache' });
