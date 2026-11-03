@@ -73,6 +73,13 @@ body{display:grid;grid-template-rows:auto auto minmax(0,1fr);height:100vh;height
 .reply-panel .text-button{font-size:12px;line-height:1.7;min-height:30px;overflow-wrap:anywhere}
 .reply-panel .warning-box,.reply-panel .error-text{font-size:14px;line-height:1.8;overflow-wrap:anywhere}
 .reply-panel .reply-edit-form{margin-top:22px;padding-top:18px}
+.reply-language-controls{border:1px solid var(--line);border-radius:8px;background:#f8fbf8;padding:12px;margin-bottom:18px}
+.reply-language-label{font-size:13px;font-weight:600;color:var(--green);display:block;margin-bottom:7px}
+.reply-language-controls select{width:100%;min-width:0;border:1px solid #cbded2;border-radius:6px;background:#fff;padding:9px;font-size:14px}
+.reply-language-note{font-size:12px;line-height:1.7;color:var(--muted);margin-top:7px}
+.reply-panel .reply-language-controls .translation-languages{margin:0;gap:9px;flex-wrap:wrap}
+.reply-language-controls .error-text:empty{display:none}
+.reply-language-controls .error-text{margin-top:8px}
 .reply-panel .reply-edit-form label,.reply-panel .custom-reply-label{font-size:14px}
 .reply-panel .reply-edit-form textarea{font-size:15px;min-height:100px}
 .reply-panel .reply-edit-form button{font-size:14px;min-height:38px}

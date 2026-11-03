@@ -130,3 +130,11 @@ v0.3.3：多图转录合并支持相邻尾部/头部的单条长消息重叠（�
 v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登录后 `POST /api/customers/:id/replies/edit`：输入 `{draft_id,shipment_id?,style,instruction,base_edit_id?,use_original?}`。style只能为professional/friendly/short，instruction为1—3000字。服务端读取真实的当前回复作为修改基准，不接受客户端伪造原文；base_edit_id必须等于该方案最新修订ID，尚无修订时为null。默认基于最新修订继续修改，use_original=true明确从原始回复开始。返回latest对象，`reply_edits[style]`包含最多10条记录（text/chinese/language/warnings、修改要求、版本及引用来源），原replies/messages/facts/quotes保持不变。
 
 复制修订版使用同一端点，输入 `{action:"copy",draft_id,shipment_id?,style,edit_id}`，版本有效返回 `{text}`，不调用模型。过时聊天、客户上下文、公共资料、原回复、修订ID或生成期间并发变更返回409；失败不保存部分结果。GET客户详情的每条修订包含stale标记。来源ID只允许本次提供的有效公共条目，错误模型输出返回502且不泄露响应正文或密钥。可选null数组兼容，原文和中文仍必需。只调用本客户本票上下文，不做跨客户学习，无数据库结构变更。
+
+## AI回复语言（v0.3.8）
+
+`POST /api/customers/:id/replies/language` 输入 `{draft_id,shipment_id?,style,language,source_edit_id?}`。language为en/fr/ar/darija/es，source_edit_id为当前智能修改版ID，null表示明确翻译原始回复。服务端读取该版本全文忠实翻译，中文保留来源值，不重生成业务回复。返回latest，`reply_translations[style][language]`含text/chinese/language/target_language、id、来源及版本、stale。每个方案每语言保存一个有效来源版本；有效缓存复用，不再调用模型。聊天、原回复、修订历史及客户资料不变。
+
+复制使用同端点 `{action:"copy",draft_id,shipment_id?,style,language,source_edit_id?,translation_id}`，成功返回 `{text}`，过期或来源不匹配返回409。鉴权、同源与并发限制沿用现有接口。译文保存在已有analysis字段，无数据库迁移。
+
+智能修改端点扩展可选 `reply_language` 和 `translation_id`。后者必须对应当前显示的、有效且来源匹配的译文，服务端据此修正译文中的具体词句；reply_language指定最终回复语言。原有不传这两个字段的调用保持兼容。自定义中文翻译仍使用原 `/api/replies/translate` 与多选languages，不受本端点影响。

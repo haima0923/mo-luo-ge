@@ -12,6 +12,7 @@ import { DEMO } from './lib/demo.mjs';
 import { createIntelligenceAnalyzer,extractIntelligenceQuery } from './lib/intelligence-ai.mjs';
 import { chatDate } from './lib/intelligence.mjs';
 import { createReplyEditor,replyEditState,replyEditContextRevision,originalReplyRevision,EDITABLE_REPLY_STYLES } from './lib/reply-edit.mjs';
+import { createSuggestedReplyTranslator,replyTranslationState,replyLanguageSource,replySourceRevision } from './lib/reply-language.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const loopback = h => ['127.0.0.1', 'localhost', '::1'].includes(h);
@@ -50,7 +51,11 @@ export function createApp(config = readConfig(), options = {}) {
   function referenceMetadata(revision,entries){return {reference_revision:revision,reference_sources:entries.map(({id,title,category,scope,valid_until,updated_at})=>({id,title,category,scope,valid_until,updated_at}))};}
   function referenceState(analysis,customerId=null,shipmentId=null){
     if(!analysis)return analysis;
-    const value=customerId&&analysis.reply_edits?replyEditState(analysis,store.context(customerId,'',shipmentId),store.library.revision()):analysis;
+    let value=analysis;
+    if(customerId&&(analysis.reply_edits||analysis.reply_translations)){
+      const context=store.context(customerId,'',shipmentId),revision=store.library.revision();
+      value=replyTranslationState(replyEditState(analysis,context,revision),context,revision);
+    }
     if(analysis.demo)return value;
     return {...value,references_stale:analysis.reference_revision?analysis.reference_revision!==store.library.revision():store.library.eligible().length>0};
   }
@@ -101,7 +106,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.7'
+        model: settings.view().model, version: '0.3.8'
       });
       if (method === 'POST' && path === '/api/login') {
         const ip = req.socket.remoteAddress || 'local', entry = attempts.get(ip) || { count: 0, until: 0 };
@@ -230,6 +235,29 @@ export function createApp(config = readConfig(), options = {}) {
         return send(201, store.createCustomer({ name: str(b.name,120,true), phone: str(b.phone||'',80), city: str(b.city||'',100), preferred_language: str(b.preferred_language||'',80) }));
       }
       let match;
+      if((match=path.match(new RegExp(`^/api/customers/(${idPattern})/replies/language$`)))&&method==='POST'){
+        const body=await readJson(req),id=match[1],shipmentId=body.shipment_id?str(body.shipment_id,36,true):null;
+        if(!EDITABLE_REPLY_STYLES.includes(body.style)||typeof body.language!=='string'||!Object.hasOwn(TRANSLATION_LANGUAGES,body.language)||body.action!==undefined&&!['generate','copy'].includes(body.action))throw new HttpError(400,'请选择有效的回复及语言。');
+        store.customer(id);if(shipmentId)store.shipment(shipmentId,id);
+        const latest=store.latest(id,shipmentId);
+        if(!latest||latest.id!==body.draft_id)throw new HttpError(409,'当前聊天已更新，请刷新后再选择语言。');
+        const state=referenceState(latest,id,shipmentId),sourceId=body.source_edit_id??null,source=replyLanguageSource(state,body.style,sourceId);
+        if(!source||latest.stale||state.references_stale)throw new HttpError(409,'回复或资料已更新，请先更新回复再翻译。');
+        const cached=state.reply_translations?.[body.style]?.[body.language],sourceRevision=replySourceRevision(source,sourceId);
+        if(body.action==='copy'){
+          if(!cached||cached.id!==body.translation_id||cached.stale||cached.source_revision!==sourceRevision)throw new HttpError(409,'该语言回复已失效，请重新翻译后复制。');
+          return send(200,{text:cached.text});
+        }
+        if(cached&&!cached.stale&&cached.source_revision===sourceRevision)return send(200,state);
+        if(active.size>=2)throw new HttpError(429,'已有请求正在进行，请稍后重试。');
+        const expected=JSON.stringify(store.draft(latest.id).analysis),contextRevision=replyEditContextRevision(store.context(id,'',shipmentId)),revision=store.library.revision(),key=Symbol();active.add(key);
+        try{
+          const translated=await createSuggestedReplyTranslator(settings.config(),options.qwenFetcher)(source,body.language);
+          if(store.latest(id,shipmentId)?.id!==latest.id||store.library.revision()!==revision||replyEditContextRevision(store.context(id,'',shipmentId))!==contextRevision)throw new HttpError(409,'翻译期间回复或资料已更新，请重试。');
+          store.addReplyTranslation(latest.id,expected,body.style,body.language,{...translated,id:randomUUID(),source_edit_id:sourceId,source_revision:sourceRevision,context_revision:contextRevision,reference_revision:revision,created_at:new Date().toISOString()});
+          return send(200,referenceState(store.latest(id,shipmentId),id,shipmentId));
+        }finally{active.delete(key);}
+      }
       if((match=path.match(new RegExp(`^/api/customers/(${idPattern})/replies/edit$`)))&&method==='POST'){
         const body=await readJson(req),id=match[1],shipmentId=body.shipment_id?str(body.shipment_id,36,true):null;
         if(!EDITABLE_REPLY_STYLES.includes(body.style)||body.use_original!==undefined&&typeof body.use_original!=='boolean'||body.action!==undefined&&!['generate','copy'].includes(body.action))throw new HttpError(400,'请选择有效回复及修改操作。');
@@ -245,12 +273,19 @@ export function createApp(config = readConfig(), options = {}) {
         }
         if((body.base_edit_id??null)!==(previous?.id??null))throw new HttpError(409,'回复已有新的修改版，请刷新后再修改。');
         if(previous?.stale&&!body.use_original)throw new HttpError(409,'原回复或资料已更新，请基于原回复重新修改。');
-        const instruction=str(body.instruction,3000,true),base=!body.use_original&&previous?previous:original;
+        const replyLanguage=body.reply_language??null;
+        if(replyLanguage!==null&&(typeof replyLanguage!=='string'||!Object.hasOwn(TRANSLATION_LANGUAGES,replyLanguage)))throw new HttpError(400,'请选择支持的回复语言。');
+        const instruction=str(body.instruction,3000,true);let base=!body.use_original&&previous?previous:original;
+        if(body.translation_id){
+          const translated=state.reply_translations?.[body.style]?.[replyLanguage],sourceId=!body.use_original&&previous?previous.id:null;
+          if(!translated||translated.id!==body.translation_id||translated.stale||translated.source_revision!==replySourceRevision(base,sourceId))throw new HttpError(409,'当前语言版本已更新，请重新翻译后修改。');
+          base=translated;
+        }
         if(active.size>=2)throw new HttpError(429,'已有请求正在进行，请稍后重试。');
         const expected=JSON.stringify(store.draft(latest.id).analysis),context=store.context(id,'',shipmentId),contextRevision=replyEditContextRevision(context),revision=store.library.revision();
         const references=store.library.select([base.text,base.chinese,instruction,...latest.messages.map(m=>m.original+' '+m.chinese)].join(' '),context),key=Symbol();active.add(key);
         try{
-          const result=await createReplyEditor(settings.config(),options.qwenFetcher)({reply:{text:base.text,chinese:base.chinese,language:base.language},instruction,analysis:latest,context,references});
+          const result=await createReplyEditor(settings.config(),options.qwenFetcher)({reply:{text:base.text,chinese:base.chinese,language:base.language},instruction,analysis:latest,context,references,replyLanguage});
           if(store.latest(id,shipmentId)?.id!==latest.id||store.library.revision()!==revision||replyEditContextRevision(store.context(id,'',shipmentId))!==contextRevision)throw new HttpError(409,'修改期间聊天或资料已更新，请重试。');
           store.addReplyEdit(latest.id,expected,body.style,{...result,id:randomUUID(),parent_id:previous?.id||null,from_original:!!body.use_original,instruction,created_at:new Date().toISOString(),context_revision:contextRevision,reference_revision:revision,original_revision:originalReplyRevision(original),
             reference_sources:references.filter(r=>result.reference_ids.includes(r.id)).map(({id,title})=>({id,title}))});

@@ -216,18 +216,43 @@ function bindReferenceRefresh(){
 const replyLanguages=[['en','英语'],['fr','法语'],['ar','阿拉伯语'],['darija','摩洛哥达里贾'],['es','西班牙语']];
 const customReplies=new Map();
 const replyEditors=new Map();
+const replyLanguageChoices=new Map(),replyLanguageRequests=new Map(),replyLanguageActive=new Set();
 let repliesCollapsed=false;
 const replyScope=()=>`${state.selected||'new'}:${state.shipment||'general'}`;
 function customReplyState(){const key=replyScope();if(!customReplies.has(key))customReplies.set(key,{text:'',languages:['en'],translations:[],busy:false,error:''});return customReplies.get(key);}
 function replyEditorState(latest,style){const key=`${replyScope()}:${latest.id}:${style}`;if(!replyEditors.has(key))replyEditors.set(key,{text:'',busy:false,error:'',useOriginal:false});return replyEditors.get(key);}
-function bindReplyEditor(latest,original,edit,entry){
+function replyLanguageChoice(){const key=replyScope();if(!replyLanguageChoices.has(key))replyLanguageChoices.set(key,{language:'auto'});return replyLanguageChoices.get(key);}
+function replyLanguageCode(value){
+  const name=String(value||'').trim().toLowerCase();
+  return [['en',['en','english','英语']],['fr',['fr','french','français','法语']],['ar',['ar','arabic','العربية','阿拉伯语']],['darija',['darija','moroccan arabic','الدارجة','摩洛哥达里贾','达里贾']],['es',['es','spanish','español','西班牙语']]].find(([,names])=>names.includes(name))?.[0]||'';
+}
+function replyLanguageRequest(latest,style,source,sourceId,language){
+  const key=JSON.stringify([replyScope(),latest.id,style,sourceId,source.text,source.chinese,latest.reference_revision,language]);
+  if(!replyLanguageRequests.has(key))replyLanguageRequests.set(key,{busy:false,error:''});return replyLanguageRequests.get(key);
+}
+async function translateSuggestedReply(latest,style,source,sourceId,language,request){
+  const id=state.selected,shipment=state.shipment,scope=replyScope(),version=selectionVersion;
+  if(replyLanguageActive.has(scope)||request.busy)return;
+  request.busy=true;request.error='';replyLanguageActive.add(scope);
+  try{
+    const result=await post(`/api/customers/${id}/replies/language`,{draft_id:latest.id,shipment_id:shipment,style,language,source_edit_id:sourceId});
+    const current=sourceId?state.detail?.latest?.reply_edits?.[style]?.at(-1):state.detail?.latest?.replies?.find(r=>r.style===style);
+    if(replyScope()===scope&&selectionVersion===version&&state.detail?.latest?.id===latest.id&&current?.text===source.text&&current?.chinese===source.chinese&&current?.language===source.language&&JSON.stringify(current.reference_ids||[])===JSON.stringify(source.reference_ids||[])&&(!sourceId||current.id===sourceId)){
+      const cache=state.detail.latest.reply_translations||{};
+      state.detail.latest={...state.detail.latest,reply_translations:{...cache,[style]:{...cache[style],[language]:result.reply_translations[style][language]}}};
+    }
+  }catch(error){request.error=error.message;}
+  finally{request.busy=false;replyLanguageActive.delete(scope);if(replyScope()===scope&&state.detail?.latest&&state.replyStyle!=='custom')renderReplies(state.detail.latest);}
+}
+function bindReplyEditor(latest,original,edit,entry,translation=null){
   $('reply-edit-input').oninput=()=>{entry.text=$('reply-edit-input').value;entry.error='';$('reply-edit-error').textContent='';};
   if($('toggle-original-reply'))$('toggle-original-reply').onclick=()=>{entry.useOriginal=!entry.useOriginal;renderReplies(state.detail?.latest||latest);};
   $('reply-edit-form').onsubmit=async event=>{
     event.preventDefault();if(entry.busy||!entry.text.trim())return;
     if(!state.status.qwen_configured){settings();return;}
     const id=state.selected,shipment=state.shipment,scope=replyScope(),style=original.style,draftId=latest.id;
-    const body={draft_id:draftId,shipment_id:shipment,style,instruction:entry.text.trim(),base_edit_id:edit?.id||null,use_original:entry.useOriginal||!!edit?.stale};
+    const language=replyLanguageChoice().language;
+    const body={draft_id:draftId,shipment_id:shipment,style,instruction:entry.text.trim(),base_edit_id:edit?.id||null,use_original:entry.useOriginal||!!edit?.stale,reply_language:language==='auto'?undefined:language,translation_id:translation?.id};
     entry.busy=true;entry.error='';state.replyStyle=style;renderReplies(latest);
     try{
       const result=await post(`/api/customers/${id}/replies/edit`,body);entry.text='';entry.useOriginal=false;
@@ -241,9 +266,12 @@ function renderReplies(latest){
   $('replies').hidden=false;
   const reply=replies.find(r=>r.style===state.replyStyle)||replies[0];
   const tabs=`${replies.map(r=>`<button data-reply="${r.style}" class="${!custom&&reply.style===r.style?'active':''}">${styles[r.style]}</button>`).join('')}<button data-reply="custom" class="${custom?'active':''}">自定义回复</button>`;
-  $('replies').innerHTML=`<div class="reply-head"><div class="reply-heading"><h3>AI 回复参考 ${latest?.demo?'· 固定演示':''}</h3><div class="reply-heading-actions"><button type="button" id="reference-library-btn" class="button quiet reference-library-button">数据库参考</button><button type="button" id="toggle-replies" class="reply-collapse" aria-controls="reply-content"></button></div></div><div class="reply-tabs">${tabs}</div></div><div id="reply-content"></div><section id="intelligence-matches" class="intelligence-matches" aria-label="智库历史询价参考"></section>`;
+  const languageChoice=replyLanguageChoice();
+  const languageControls=custom?`<fieldset class="translation-languages"><legend>翻译语言（可多选）</legend>${replyLanguages.map(([code,name])=>`<label><input type="checkbox" name="language" value="${code}" ${customReplyState().languages.includes(code)?'checked':''}>${name}</label>`).join('')}</fieldset>`:`<label class="reply-language-label" for="reply-language-select">回复语言</label><select id="reply-language-select" ${latest?.stale||latest?.references_stale?'disabled':''}><option value="auto">原回复语言（自动识别）</option>${replyLanguages.map(([code,name])=>`<option value="${code}" ${languageChoice.language===code?'selected':''}>${name}</option>`).join('')}</select><p class="reply-language-note">按当前显示版本翻译，保留智能修改内容。</p>`;
+  $('replies').innerHTML=`<div class="reply-head"><div class="reply-heading"><h3>AI 回复参考 ${latest?.demo?'· 固定演示':''}</h3><div class="reply-heading-actions"><button type="button" id="reference-library-btn" class="button quiet reference-library-button">数据库参考</button><button type="button" id="toggle-replies" class="reply-collapse" aria-controls="reply-content"></button></div></div><div class="reply-tabs">${tabs}</div></div><section class="reply-language-controls" aria-label="回复与翻译语言">${languageControls}<p id="reply-language-error" class="error-text" role="status"></p></section><div id="reply-content"></div><section id="intelligence-matches" class="intelligence-matches" aria-label="智库历史询价参考"></section>`;
   intelUI.renderMatches(latest);
   $('reference-library-btn').onclick=referenceLibrary;
+  if($('reply-language-select'))$('reply-language-select').onchange=()=>{languageChoice.language=$('reply-language-select').value;renderReplies(state.detail?.latest||latest);};
   if(latest?.reference_reply_error&&!replies.length){$('reply-content').insertAdjacentHTML('beforebegin',`<div class="warning-box">${esc(latest.reference_reply_error)}<br><button type="button" id="refresh-reference-replies" class="button quiet">按资料库更新回复</button></div>`);bindReferenceRefresh();}
   function applyCollapse(){
     $('reply-content').hidden=repliesCollapsed;$('replies').classList.toggle('is-collapsed',repliesCollapsed);
@@ -257,20 +285,28 @@ function renderReplies(latest){
     if(latest.stale){$('reply-content').innerHTML='<div class="warning-box">消息、报价或运输需求有变更，旧回复已停用。请重新分析，或使用自定义回复翻译你要表达的内容。</div>';return;}
     if(latest.references_stale){$('reply-content').innerHTML='<div class="warning-box">公共资料库已更新或资料有效期有变化，旧自动回复已停用，请按当前资料重新生成。</div><button type="button" id="refresh-reference-replies" class="button quiet">按资料库更新回复</button>';bindReferenceRefresh();return;}
     const edit=latest.reply_edits?.[reply.style]?.at(-1),editor=replyEditorState(latest,reply.style),usingEdit=edit&&!edit.stale&&!editor.useOriginal,shown=usingEdit?edit:reply;
-    $('reply-content').innerHTML=`${edit?`<div class="reply-edit-version"><span>${usingEdit?'当前为修改版':edit.stale?'旧修改版已失效，当前显示原回复':'当前显示原回复'}</span>${!edit.stale?`<button type="button" id="toggle-original-reply" class="text-button">${usingEdit?'使用原回复':'查看修改版'}</button>`:''}</div>`:''}<p class="reply-text" dir="auto">${esc(shown.text)}</p><p class="reply-zh">${esc(shown.chinese)}</p>${usingEdit?`<p class="reply-edit-note">本次修改：${esc(edit.instruction)}</p>${edit.warnings.length?`<div class="warning-box">${edit.warnings.map(esc).join('<br>')}</div>`:''}`:''}<div class="reply-copy"><span>需你确认 · 复制不会自动发送</span><div class="reply-copy-buttons"><button type="button" id="refresh-reference-replies" class="button quiet">按资料库更新回复</button><button id="copy-reply" class="button" ${editor.busy?'disabled':''}>复制回复</button></div></div><div id="reply-reference-sources" class="reply-reference-sources"></div><form id="reply-edit-form" class="reply-edit-form"><label for="reply-edit-input">智能修改</label><textarea id="reply-edit-input" rows="3" maxlength="3000" placeholder="告诉 AI 要改哪里，例如：把65天改成70天，其他内容不变。" required ${editor.busy?'disabled':''}>${esc(editor.text)}</textarea><p id="reply-edit-error" class="error-text" role="status">${esc(editor.error)}</p><div><span>${usingEdit?'可继续修改当前修改版':'根据当前原回复修改'}</span><button id="submit-reply-edit" class="button primary" ${editor.busy?'disabled':''}>${editor.busy?'正在修改…':'生成修改版'}</button></div></form>`;
+    const sourceId=usingEdit?edit.id:null,language=languageChoice.language,needsTranslation=language!=='auto'&&replyLanguageCode(shown.language)!==language;
+    const cached=latest.reply_translations?.[reply.style]?.[language],translation=needsTranslation&&cached&&!cached.stale&&(cached.source_edit_id??null)===sourceId?cached:null;
+    const languageRequest=replyLanguageRequest(latest,reply.style,shown,sourceId,language),ready=!needsTranslation||!!translation,displayText=translation?.text||shown.text;
+    $('reply-language-error').textContent=languageRequest.error;
+    if(needsTranslation&&!translation&&languageRequest.error){$('reply-language-error').insertAdjacentHTML('afterend','<button type="button" id="retry-reply-language" class="button quiet">重试翻译</button>');$('retry-reply-language').onclick=()=>{languageRequest.error='';renderReplies(state.detail?.latest||latest);};}
+    $('reply-content').innerHTML=`${edit?`<div class="reply-edit-version"><span>${usingEdit?'当前为修改版':edit.stale?'旧修改版已失效，当前显示原回复':'当前显示原回复'}</span>${!edit.stale?`<button type="button" id="toggle-original-reply" class="text-button">${usingEdit?'使用原回复':'查看修改版'}</button>`:''}</div>`:''}<p class="reply-text" dir="auto">${ready?esc(displayText):languageRequest.error?'所选语言暂未生成，请重试或切回原回复语言。':`正在翻译为${esc(replyLanguages.find(([code])=>code===language)?.[1])}…`}</p><p class="reply-zh">${esc(shown.chinese)}</p>${usingEdit?`<p class="reply-edit-note">本次修改：${esc(edit.instruction)}</p>${edit.warnings.length?`<div class="warning-box">${edit.warnings.map(esc).join('<br>')}</div>`:''}`:''}<div class="reply-copy"><span>需你确认 · 复制不会自动发送</span><div class="reply-copy-buttons"><button type="button" id="refresh-reference-replies" class="button quiet">按资料库更新回复</button><button id="copy-reply" class="button" ${editor.busy||!ready?'disabled':''}>复制回复</button></div></div><div id="reply-reference-sources" class="reply-reference-sources"></div><form id="reply-edit-form" class="reply-edit-form"><label for="reply-edit-input">智能修改</label><textarea id="reply-edit-input" rows="3" maxlength="3000" placeholder="告诉 AI 要改哪里，例如：把65天改成70天，其他内容不变。" required ${editor.busy?'disabled':''}>${esc(editor.text)}</textarea><p id="reply-edit-error" class="error-text" role="status">${esc(editor.error)}</p><div><span>${usingEdit?'可继续修改当前修改版':'根据当前原回复修改'}</span><button id="submit-reply-edit" class="button primary" ${editor.busy||!ready||replyLanguageActive.has(replyScope())?'disabled':''}>${editor.busy?'正在修改…':'生成修改版'}</button></div></form>`;
     $('copy-reply').onclick=async()=>{
-      if(!usingEdit){await copy(reply.text);return;}
+      if(!ready)return;
+      if(!usingEdit&&!translation){await copy(shown.text);return;}
       const id=state.selected,shipment=state.shipment,scope=replyScope();
-      try{const checked=await post(`/api/customers/${id}/replies/edit`,{action:'copy',draft_id:latest.id,shipment_id:shipment,style:reply.style,edit_id:edit.id});
-        if(replyScope()===scope&&state.detail?.latest?.id===latest.id&&state.replyStyle===reply.style&&state.detail.latest.reply_edits?.[reply.style]?.at(-1)?.id===edit.id)await copy(checked.text);
-      }catch(error){if(replyScope()===scope&&state.detail?.latest?.id===latest.id&&state.detail.latest.reply_edits?.[reply.style]?.at(-1)?.id===edit.id){editor.error=error.message;state.detail.latest.reply_edits[reply.style].at(-1).stale=true;renderReplies(state.detail.latest);}}
-    };bindReferenceRefresh();bindReplyEditor(latest,reply,edit,editor);
+      try{const checked=translation?await post(`/api/customers/${id}/replies/language`,{action:'copy',draft_id:latest.id,shipment_id:shipment,style:reply.style,language,source_edit_id:sourceId,translation_id:translation.id}):await post(`/api/customers/${id}/replies/edit`,{action:'copy',draft_id:latest.id,shipment_id:shipment,style:reply.style,edit_id:edit.id});
+        if(replyScope()===scope&&state.detail?.latest?.id===latest.id&&state.replyStyle===reply.style&&replyLanguageChoice().language===language&&(translation?state.detail.latest.reply_translations?.[reply.style]?.[language]?.id===translation.id:state.detail.latest.reply_edits?.[reply.style]?.at(-1)?.id===edit.id))await copy(checked.text);
+      }catch(error){if(replyScope()===scope&&state.detail?.latest?.id===latest.id){if(translation){languageRequest.error=error.message;translation.stale=true;}else{editor.error=error.message;edit.stale=true;}renderReplies(state.detail.latest);}}
+    };bindReferenceRefresh();bindReplyEditor(latest,reply,edit,editor,translation);
     const sources=usingEdit?edit.reference_sources:(latest.reference_sources||[]).filter(source=>(reply.reference_ids||[]).includes(source.id));
     $('reply-reference-sources').innerHTML=sources.length?'参考资料：'+sources.map(source=>`<button type="button" class="text-button" data-reply-reference="${source.id}">${esc(source.title)}</button>`).join(' · '):'';
-    document.querySelectorAll('[data-reply-reference]').forEach(button=>button.onclick=()=>referenceView(button.dataset.replyReference));return;
+    document.querySelectorAll('[data-reply-reference]').forEach(button=>button.onclick=()=>referenceView(button.dataset.replyReference));
+    if(needsTranslation&&!translation&&!languageRequest.error&&!languageRequest.busy&&!replyLanguageActive.has(replyScope()))translateSuggestedReply(latest,reply.style,shown,sourceId,language,languageRequest);
+    return;
   }
   const entry=customReplyState(),scope=replyScope();
-  $('reply-content').innerHTML=`<form id="custom-reply-form"><label for="custom-reply-text" class="custom-reply-label">输入你想回复的中文</label><textarea id="custom-reply-text" rows="2" maxlength="6000" placeholder="例如：请确认包装后的总体积和重量，我再为你核算运费。" required>${esc(entry.text)}</textarea><fieldset class="translation-languages"><legend>翻译成（可多选）</legend>${replyLanguages.map(([code,name])=>`<label><input type="checkbox" name="language" value="${code}" ${entry.languages.includes(code)?'checked':''}>${name}</label>`).join('')}</fieldset><div class="custom-reply-actions"><span>忠实翻译你的原话 · 不会自动发送</span><button id="translate-custom-reply" class="button primary" ${entry.busy?'disabled':''}>${entry.busy?'正在翻译…':'翻译回复'}</button></div><p id="custom-reply-error" class="error-text" role="status">${esc(entry.error)}</p><div id="custom-reply-results"></div></form>`;
+  $('reply-content').innerHTML=`<form id="custom-reply-form"><label for="custom-reply-text" class="custom-reply-label">输入你想回复的中文</label><textarea id="custom-reply-text" rows="2" maxlength="6000" placeholder="例如：请确认包装后的总体积和重量，我再为你核算运费。" required>${esc(entry.text)}</textarea><div class="custom-reply-actions"><span>忠实翻译你的原话 · 不会自动发送</span><button id="translate-custom-reply" class="button primary" ${entry.busy?'disabled':''}>${entry.busy?'正在翻译…':'翻译回复'}</button></div><p id="custom-reply-error" class="error-text" role="status">${esc(entry.error)}</p><div id="custom-reply-results"></div></form>`;
   function renderResults(){
     $('custom-reply-results').innerHTML=entry.translations.map(item=>`<article class="custom-translation"><div><strong>${esc(item.label)}</strong><button type="button" data-copy-translation="${item.language}" class="button quiet">复制</button></div><p class="reply-text" dir="auto">${esc(item.text)}</p></article>`).join('');
     document.querySelectorAll('[data-copy-translation]').forEach(button=>button.onclick=()=>copy(entry.translations.find(item=>item.language===button.dataset.copyTranslation).text));
