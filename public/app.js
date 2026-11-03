@@ -215,14 +215,50 @@ function bindReferenceRefresh(){
 
 const replyLanguages=[['en','英语'],['fr','法语'],['ar','阿拉伯语'],['darija','摩洛哥达里贾'],['es','西班牙语']];
 const customReplies=new Map();
+const experienceRequests=new Map();
 let repliesCollapsed=false;
 const replyScope=()=>`${state.selected||'new'}:${state.shipment||'general'}`;
 function customReplyState(){const key=replyScope();if(!customReplies.has(key))customReplies.set(key,{text:'',languages:['en'],translations:[],busy:false,error:''});return customReplies.get(key);}
+function experienceRequest(){const key=`${replyScope()}:${state.detail?.latest?.id||''}`;if(!experienceRequests.has(key))experienceRequests.set(key,{busy:false,error:''});return experienceRequests.get(key);}
+async function generateExperience(latest){
+  if(!state.status.qwen_configured){settings();return;}
+  if(!state.selected||!latest||latest.stale||latest.demo)return;
+  const id=state.selected,shipment=state.shipment,scope=replyScope(),request=experienceRequest(),draftId=latest.id;
+  if(request.busy)return;request.busy=true;request.error='';renderReplies(state.detail?.latest);
+  try{
+    const result=await post(`/api/customers/${id}/replies/experience`,{draft_id:draftId,shipment_id:shipment});
+    if(replyScope()===scope&&state.detail?.latest?.id===draftId)state.detail.latest=result;
+  }catch(error){request.error=error.message;}
+  finally{request.busy=false;if(replyScope()===scope&&state.replyStyle==='experience')renderReplies(state.detail?.latest);}
+}
+function renderExperience(latest){
+  const target=$('reply-content'),request=experienceRequest(),reply=latest?.experience_reply;
+  if(!state.selected||!latest){target.innerHTML='<p class="experience-note">先选择客户并审核归档聊天，再生成经验推荐。</p>';return;}
+  if(latest.demo){target.innerHTML='<p class="experience-note">固定演示不用于经验学习，请先上传并审核实际聊天。</p>';return;}
+  if(latest.stale){target.innerHTML='<div class="warning-box">原消息或运输资料已变更，请重新分析聊天后生成经验推荐。</div>';return;}
+  target.innerHTML=`<p class="experience-note">学习我方已确认回复的跟进习惯，结合当前客户的语言和表达风格。先回答，再判断是否需要自然追问。</p>
+    ${reply&&latest.experience_stale?'<div class="warning-box">经验来源或业务资料已更新，旧推荐已停用，请重新生成。</div>':''}
+    <p id="experience-error" class="error-text" role="status">${esc(request.error)}</p>
+    ${reply&&!latest.experience_stale?`<p class="reply-text" id="experience-text" dir="auto">${esc(reply.text)}</p><p class="reply-zh">${esc(reply.chinese)}</p><div class="experience-reason"><strong>推荐理由 · 经验推测</strong><p>${esc(reply.reason)}</p>${reply.follow_up?`<p>这次追问：${esc(reply.follow_up)}</p>`:''}</div>
+    <p class="experience-note">学习范围：${reply.learned_replies} 条我方回复 · 当前客户 ${reply.customer_messages} 条消息。${reply.learned_replies?'':'历史经验不足，本次属于一般沟通建议。'}</p>
+    ${reply.needs_confirmation.length?`<div class="warning-box">待核对：${reply.needs_confirmation.map(esc).join('；')}</div>`:''}
+    <details class="experience-sources"><summary>经验与资料依据</summary>${reply.patterns.map(p=>`<p>${esc(p.label)}：观察到 ${p.count} 次</p>`).join('')}${reply.examples.map(e=>`<button type="button" class="text-button" data-experience-source="${esc(e.id)}">查看当前客户的历史对话示例 ↗</button>`).join('')}${reply.reference_sources.map(r=>`<button type="button" class="text-button" data-experience-reference="${esc(r.id)}">${esc(r.title)} ↗</button>`).join('')}${!reply.patterns.length&&!reply.examples.length&&!reply.reference_sources.length?'<p>模型未引用具体历史示例或公共资料，请核对推荐理由。</p>':''}</details>`:''}
+    <div class="reply-copy"><span>经验建议需确认 · 不会自动发送</span><div class="reply-copy-buttons"><button type="button" id="generate-experience" class="button quiet" ${request.busy?'disabled':''}>${request.busy?'正在学习并推荐…':reply?'重新生成':'生成经验推荐'}</button>${reply&&!latest.experience_stale?`<button type="button" id="copy-experience" class="button" ${request.busy?'disabled':''}>复制回复</button>`:''}</div></div>`;
+  $('generate-experience').onclick=()=>generateExperience(latest);
+  if($('copy-experience'))$('copy-experience').onclick=async()=>{
+    const id=state.selected,shipment=state.shipment,scope=replyScope(),generationId=reply.generation_id;
+    try{const checked=await post(`/api/customers/${id}/replies/experience`,{action:'copy',draft_id:latest.id,shipment_id:shipment,generation_id:generationId});
+      if(replyScope()===scope&&state.replyStyle==='experience'&&state.detail?.latest?.experience_reply?.generation_id===generationId)await copy(checked.text);
+    }catch(error){if(replyScope()===scope&&state.detail?.latest?.id===latest.id){request.error=error.message;state.detail.latest.experience_stale=true;renderReplies(state.detail.latest);}}
+  };
+  document.querySelectorAll('[data-experience-source]').forEach(button=>button.onclick=()=>{const e=reply.examples.find(e=>e.id===button.dataset.experienceSource);showSmall('当前客户的历史沟通示例',`<p>仅参考表达和跟进方式；旧业务信息需重新核对。</p><div class="source-quote" dir="auto">${esc(e.question.original)}</div><p class="translation">${esc(e.question.chinese)}</p><div class="source-quote" dir="auto">${esc(e.reply.original)}</div><p class="translation">${esc(e.reply.chinese)}</p>`);});
+  document.querySelectorAll('[data-experience-reference]').forEach(button=>button.onclick=()=>referenceView(button.dataset.experienceReference));
+}
 function renderReplies(latest){
-  const replies=latest?.replies||[],custom=state.replyStyle==='custom'||!replies.length;
+  const replies=latest?.replies||[],experience=state.replyStyle==='experience',custom=!experience&&(state.replyStyle==='custom'||!replies.length);
   $('replies').hidden=false;
   const reply=replies.find(r=>r.style===state.replyStyle)||replies[0];
-  const tabs=`${replies.map(r=>`<button data-reply="${r.style}" class="${!custom&&reply.style===r.style?'active':''}">${styles[r.style]}</button>`).join('')}<button data-reply="custom" class="${custom?'active':''}">自定义回复</button>`;
+  const tabs=`${replies.map(r=>`<button data-reply="${r.style}" class="${!custom&&!experience&&reply.style===r.style?'active':''}">${styles[r.style]}</button>`).join('')}<button data-reply="experience" class="${experience?'active':''}">经验推荐</button><button data-reply="custom" class="${custom?'active':''}">自定义回复</button>`;
   $('replies').innerHTML=`<div class="reply-head"><div class="reply-heading"><h3>AI 回复参考 ${latest?.demo?'· 固定演示':''}</h3><button type="button" id="reference-library-btn" class="button quiet reference-library-button">数据库参考</button></div><div class="reply-tabs">${tabs}<button type="button" id="toggle-replies" class="reply-collapse" aria-controls="reply-content"></button></div></div><div id="reply-content"></div><section id="intelligence-matches" class="intelligence-matches" aria-label="智库历史询价参考"></section>`;
   intelUI.renderMatches(latest);
   $('reference-library-btn').onclick=referenceLibrary;
@@ -233,7 +269,8 @@ function renderReplies(latest){
     button.textContent=repliesCollapsed?'⌄':'⌃';button.title=label;button.setAttribute('aria-label',label);button.setAttribute('aria-expanded',String(!repliesCollapsed));
   }
   $('toggle-replies').onclick=()=>{repliesCollapsed=!repliesCollapsed;applyCollapse();};applyCollapse();
-  document.querySelectorAll('[data-reply]').forEach(b=>b.onclick=()=>{state.replyStyle=b.dataset.reply;repliesCollapsed=false;renderReplies(latest);});
+  document.querySelectorAll('[data-reply]').forEach(b=>b.onclick=()=>{state.replyStyle=b.dataset.reply;repliesCollapsed=false;renderReplies(latest);if(state.replyStyle==='experience'&&latest&&!latest.experience_reply&&!experienceRequest().error)generateExperience(latest);});
+  if(experience){renderExperience(latest);return;}
   if(!custom){
     if(latest.stale){$('reply-content').innerHTML='<div class="warning-box">消息、报价或运输需求有变更，旧回复已停用。请重新分析，或使用自定义回复翻译你要表达的内容。</div>';return;}
     if(latest.references_stale){$('reply-content').innerHTML='<div class="warning-box">公共资料库已更新或资料有效期有变化，旧自动回复已停用，请按当前资料重新生成。</div><button type="button" id="refresh-reference-replies" class="button quiet">按资料库更新回复</button>';bindReferenceRefresh();return;}

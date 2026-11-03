@@ -124,3 +124,9 @@ v0.3.1：分析和审核归档的facts上限为400。图片分析结果兼容可
 v0.3.2：`analysis.product_terms` 为可选检索提示，不再作为整批分析失败的条件。接受字符串、字符串数组及明确的name/product/term/aliases/specs/keywords字段对象；仅保留去重后的非空字符串（每项最多120字，最多16项）。异常项忽略并加入安全warnings，不调用结构修复，不回显异常值；消息、翻译和事实仍严格验证，审核归档和客户隔离不变。GET客户智库检索在没有有效检索词时继续使用当前范围的货物事实/客户聊天。
 
 v0.3.3：多图转录合并支持相邻尾部/头部的单条长消息重叠（原文至少24个字母/数字，或12个汉字，身份明确、无时间冲突），同时兼容有限排版/时间格式差异；不做编辑距离模糊匹配。草稿warnings提示合并数量，facts.message_index及智库询价/回复索引基于合并后的消息表，原图来源保留。分次归档的单条重叠仅对截图开放，需双方完整日期时间；归档响应仍为inserted/skipped，作用域保持客户+shipment或group。旧收据、签名与数据库结构兼容；实质校对的消息不能靠旧收据覆盖。已归档重复消息不批量删除。
+
+## 经验推荐（v0.3.4）
+
+登录后 `POST /api/customers/:id/replies/experience`，输入 `{draft_id,shipment_id?}` 或 `action:"generate"`。仅用于当前客户当前票最新的已归档、非演示且未失效聊天，和其他模型调用共用并发限制。返回带 `experience_reply` 的latest对象，包含text/chinese/language/reason/follow_up、needs_confirmation、experience_ids/reference_ids、引用的固定统计/本客户示例/公共资料、学习条数及版本。参考模式最多16项、当前客户同票示例最多6组；共享模式仅有固定标签和计数，不含其他客户原文。来源ID必须属于本次实际提供的候选，否则502且不存结果。
+
+推荐保存在原draft.analysis内，不改变messages、facts、quotes或三种普通replies。生成期间聊天、历史或资料变化返回409，不保存旧结果；GET客户详情通过experience_stale标明旧推荐失效。复制使用同一端点，输入 `{action:"copy",draft_id,shipment_id?,generation_id}`，服务端校验最新聊天、生成ID、经验历史、客户上下文和公共资料版本，成功仅返回 `{text}`；过时返回409，不调用模型。每次生成/重新生成会产生额外模型调用，失败不自动循环重试。没有历史经验的结果通过learned_replies=0明确提示一般建议。仅使用已有SQLite字段，无新增数据库迁移。

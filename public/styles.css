@@ -101,6 +101,10 @@
 .reply-panel .reply-tabs button{padding:7px 9px}
 .reply-panel .reply-tabs .reply-collapse{margin-left:auto;padding:0}
 .reply-panel .reply-copy,.reply-panel .custom-reply-actions{flex-wrap:wrap;gap:10px}
+.experience-note{font-size:11px;color:var(--muted);line-height:1.8;margin:8px 0 12px}
+.experience-reason{padding:12px;background:var(--green-pale);border-radius:8px;font-size:11px;line-height:1.9;margin-top:12px;overflow-wrap:anywhere}
+.experience-reason p{margin-top:6px}.experience-sources{font-size:11px;line-height:1.9;margin-top:12px;overflow-wrap:anywhere}
+.experience-sources summary{cursor:pointer;color:var(--green)}.experience-sources .text-button{display:block;text-align:left}
 .reply-panel .reply-text{font-size:13px;line-height:1.9}
 .reply-panel #custom-reply-text{min-height:120px;max-height:280px}
 .reply-panel .translation-languages{gap:12px;margin:18px 0}
