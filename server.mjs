@@ -108,7 +108,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.10'
+        model: settings.view().model, version: '0.3.11'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;
@@ -151,17 +151,18 @@ export function createApp(config = readConfig(), options = {}) {
           const body=await readJson(req),group=intel.group(str(body.group_id,36,true)),images=decodeImages(body.images||[]),text=str(body.text||'',16000),chat_date=chatDate(body.chat_date||'');
           if(!images.length&&!text)throw new HttpError(400,'请上传同一微信群的截图或输入聊天原文。');
           const key=Symbol();active.add(key);
-          const run=async()=>{
+          const run=async(onProgress=()=>{})=>{
             try{
               const analyze=options.analyzeIntelligence||createIntelligenceAnalyzer(settings.config(),options.qwenFetcher);
-              const analysis=await analyze({images,text,group,context:messages=>intel.context(group.id,messages)});
+              const analysis=await analyze({images,text,group,context:messages=>intel.context(group.id,messages),onProgress});
+              onProgress('正在保存完整的待审核导入');
               return intel.saveDraft({group_id:group.id,chat_date,analysis,images});
             }finally{active.delete(key);}
           };
           if(body.async===true){
             for(const [id,job] of intelligenceJobs)if(job.status!=='running'&&(Date.now()-job.started_at>1800000||intelligenceJobs.size>=100))intelligenceJobs.delete(id);
-            const id=randomUUID(),job={job_id:id,status:'running',started_at:Date.now()};intelligenceJobs.set(id,job);
-            run().then(draft=>Object.assign(job,{status:'completed',draft_id:draft.id}),error=>Object.assign(job,{status:'failed',error:error instanceof HttpError?error.message:'智库识别失败，请重试。',status_code:error instanceof HttpError?error.status:500}));
+            const id=randomUUID(),job={job_id:id,status:'running',started_at:Date.now(),progress:'正在准备群聊识别'};intelligenceJobs.set(id,job);
+            run(progress=>{job.progress=progress;}).then(draft=>Object.assign(job,{status:'completed',draft_id:draft.id,finished_at:Date.now()}),error=>Object.assign(job,{status:'failed',error:error instanceof HttpError?error.message:'智库识别失败，请重试。',status_code:error instanceof HttpError?error.status:500,finished_at:Date.now()}));
             return send(202,{job_id:id,status:'running'});
           }
           return send(201,await run());
@@ -169,7 +170,7 @@ export function createApp(config = readConfig(), options = {}) {
         const jobMatch=path.match(new RegExp(`^/api/intelligence/jobs/(${idPattern})$`));
         if(jobMatch&&method==='GET'){
           const job=intelligenceJobs.get(jobMatch[1]);if(!job)throw new HttpError(404,'识别任务状态不可用，请先查看待审核导入，必要时重新上传。');
-          return send(200,job);
+          return send(200,{...job,elapsed_ms:(job.finished_at||Date.now())-job.started_at});
         }
         const draftMatch=path.match(new RegExp(`^/api/intelligence/drafts/(${idPattern})(/commit)?$`));
         if(draftMatch){
