@@ -48,6 +48,7 @@ export function createApp(config = readConfig(), options = {}) {
   const attempts = new Map();
   const active = new Set();
   const intelligenceJobs=new Map();
+  const analysisJobs=new Map();
   function referenceMetadata(revision,entries){return {reference_revision:revision,reference_sources:entries.map(({id,title,category,scope,valid_until,updated_at})=>({id,title,category,scope,valid_until,updated_at}))};}
   function referenceState(analysis,customerId=null,shipmentId=null){
     if(!analysis)return analysis;
@@ -106,7 +107,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.8'
+        model: settings.view().model, version: '0.3.9'
       });
       if (method === 'POST' && path === '/api/login') {
         const ip = req.socket.remoteAddress || 'local', entry = attempts.get(ip) || { count: 0, until: 0 };
@@ -354,6 +355,12 @@ export function createApp(config = readConfig(), options = {}) {
       if ((match = path.match(new RegExp(`^/api/customers/(${idPattern})/export$`))) && method === 'GET')
         return send(200, store.exportCustomer(match[1]), { 'Content-Disposition': 'attachment; filename="customer-export.json"' });
       if (method === 'GET' && path === '/api/drafts') return send(200, store.readyDrafts());
+      const analysisJobMatch=path.match(new RegExp(`^/api/analysis/jobs/(${idPattern})$`));
+      if(analysisJobMatch&&method==='GET'){
+        const job=analysisJobs.get(analysisJobMatch[1]);
+        if(!job)throw new HttpError(404,'分析任务状态不可用，服务可能已重启。请先查看“待审核草稿”，确认没有结果后再重新上传。');
+        return send(200,{...job,elapsed_ms:(job.finished_at||Date.now())-job.started_at});
+      }
       if (method === 'POST' && path === '/api/analyze') {
         if (active.size >= 2) throw new HttpError(429, '已有分析正在进行，请稍后重试。');
         const b = await readJson(req), text = str(b.text || '', 16000), images = decodeImages(b.images || []);
@@ -361,13 +368,30 @@ export function createApp(config = readConfig(), options = {}) {
         const shipmentId = b.shipment_id ? str(b.shipment_id, 36, true) : null;
         if (shipmentId && !customerId) throw new HttpError(400, '选择运输需求前请确认客户。');
         if (!text && !images.length) throw new HttpError(400, '请上传截图或输入聊天文字。');
+        const context=store.context(customerId,text,shipmentId);
+        if (active.size >= 2) throw new HttpError(429, '已有分析正在进行，请稍后重试。');
         const key = Symbol(); active.add(key);
-        try {
-          const context=store.context(customerId,text,shipmentId);
-          const analysis = await analyze({ text, images, context });
-          const withReferences=await referencedAnalysis(analysis,context);
-          return send(201, store.saveDraft({ customerId, shipmentId, analysis:withReferences, images }));
-        } finally { active.delete(key); }
+        const run=async(onProgress=()=>{})=>{
+          try {
+            onProgress('已收到截图，正在请求千问分析');
+            const analysis = await analyze({ text, images, context, onProgress });
+            onProgress('聊天已识别，正在整理资料库参考回复');
+            const withReferences=await referencedAnalysis(analysis,context);
+            onProgress('正在保存待审核草稿');
+            return store.saveDraft({ customerId, shipmentId, analysis:withReferences, images });
+          } finally { active.delete(key); }
+        };
+        if(b.async===true){
+          for(const [id,job] of analysisJobs)if(job.status!=='running'&&(Date.now()-job.started_at>1800000||analysisJobs.size>=100))analysisJobs.delete(id);
+          const id=randomUUID(),job={job_id:id,status:'running',started_at:Date.now(),customer_id:customerId,shipment_id:shipmentId,progress:'正在准备分析'};
+          analysisJobs.set(id,job);
+          run(progress=>{job.progress=progress;}).then(
+            draft=>Object.assign(job,{status:'completed',draft_id:draft.id,progress:'分析完成，等待人工审核',finished_at:Date.now()}),
+            error=>Object.assign(job,{status:'failed',error:error instanceof HttpError?error.message:'分析失败，请稍后重试；本次未生成草稿。',status_code:error instanceof HttpError?error.status:500,finished_at:Date.now()})
+          );
+          return send(202,{job_id:id,status:'running'});
+        }
+        return send(201, await run());
       }
       if (method === 'POST' && path === '/api/demo') {
         await readJson(req);

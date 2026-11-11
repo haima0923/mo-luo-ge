@@ -138,3 +138,11 @@ v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登�
 复制使用同端点 `{action:"copy",draft_id,shipment_id?,style,language,source_edit_id?,translation_id}`，成功返回 `{text}`，过期或来源不匹配返回409。鉴权、同源与并发限制沿用现有接口。译文保存在已有analysis字段，无数据库迁移。
 
 智能修改端点扩展可选 `reply_language` 和 `translation_id`。后者必须对应当前显示的、有效且来源匹配的译文，服务端据此修正译文中的具体词句；reply_language指定最终回复语言。原有不传这两个字段的调用保持兼容。自定义中文翻译仍使用原 `/api/replies/translate` 与多选languages，不受本端点影响。
+
+## 聊天后台分析（v0.3.9）
+
+`POST /api/analyze` 在原有text/images/customer_id/shipment_id之外传入 `async:true`，校验输入、客户与本票归属后立即返回202 `{job_id,status:"running"}`。不传async保持201同步草稿兼容。共享的最多2个并发名额覆盖后台任务整个执行过程，错误也会释放名额。
+
+登录后 `GET /api/analysis/jobs/:id` 返回job_id、status（running/completed/failed）、customer_id、shipment_id、started_at、elapsed_ms、progress。completed带draft_id，通过原 `GET /api/drafts/:id` 读取持久草稿；failed带清理过的error及status_code，不返回上游正文、密钥、图片或部分分析。该接口沿用Host、同源与登录保护，阶段进度不会包含客户原文。完成前不保存部分草稿或归档消息。
+
+任务状态在进程内保留，提交时清理超过30分钟或超过100条的已结束状态；完成的草稿不随状态清理而删除。重启后未知状态返回404并提示先查待审核草稿。前端仅在当前标签页sessionStorage保存job_id供刷新恢复，不保存图片、原文或密钥；轮询网络失败不会再次POST分析。

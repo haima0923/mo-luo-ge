@@ -10,8 +10,11 @@ let toastTimer, selectionVersion=0, customerSearchTimer, chatSearchTimer;
 function toast(message,error=false){$('toast').textContent=message;$('toast').classList.toggle('error',error);$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').hidden=true,6500);}
 async function api(path,options={}){
   const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...options.headers}});
-  const value=await response.json();
-  if(!response.ok){if(response.status===401 && !path.includes('/login'))$('login-dialog').showModal();throw new Error(value.error||'请求失败');}
+  let value;
+  try{value=await response.json();}catch{
+    const error=new Error([502,503,504].includes(response.status)?`网站连接暂时中断（HTTP ${response.status}），请稍后重试。`:`网站返回了无法读取的响应（HTTP ${response.status}），请稍后重试。`);error.status=response.status;throw error;
+  }
+  if(!response.ok){if(response.status===401 && !path.includes('/login')&&!$('login-dialog').open)$('login-dialog').showModal();const error=new Error(value.error||'请求失败');error.status=response.status;throw error;}
   return value;
 }
 const post=(path,value)=>api(path,{method:'POST',body:JSON.stringify(value)});
@@ -369,13 +372,52 @@ $('drop-zone').ondragleave=()=>$('drop-zone').classList.remove('dragging');
 $('drop-zone').ondrop=e=>{e.preventDefault();$('drop-zone').classList.remove('dragging');addFiles(e.dataTransfer.files);};
 document.addEventListener('paste',e=>{if(document.querySelector('dialog[open]'))return;const files=[...(e.clipboardData?.items||[])].filter(x=>x.kind==='file').map(x=>x.getAsFile()).filter(Boolean);if(files.length){e.preventDefault();addFiles(files);setPanel('chat');}});
 const fileData=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({name:file.name,data:reader.result});reader.onerror=()=>reject(new Error('图片读取失败'));reader.readAsDataURL(file);});
-function busy(value){state.busy=value;$('analyze-btn').disabled=value;$('analyze-btn').textContent=value?'千问正在读取…':'分析并翻译 ↗';}
+const analysisJobKey='crm-analysis-job';
+let analysisJobId='';
+try{const saved=sessionStorage.getItem(analysisJobKey);if(/^[a-f0-9-]{36}$/.test(saved||''))analysisJobId=saved;}catch{}
+function rememberAnalysis(id){analysisJobId=id;try{if(id)sessionStorage.setItem(analysisJobKey,id);else sessionStorage.removeItem(analysisJobKey);}catch{}}
+function busy(value){state.busy=value;$('analyze-btn').disabled=value;$('analyze-btn').textContent=value?'千问正在读取…':analysisJobId?'继续查看分析进度':'分析并翻译 ↗';}
+function analysisProgress(text){$('analysis-progress').textContent=text;$('analysis-progress').hidden=!text;}
+async function waitForAnalysis(id){
+  let failures=0;
+  for(;;){
+    let job;
+    try{job=await api('/api/analysis/jobs/'+id);failures=0;}
+    catch(error){
+      if(error.status===404){rememberAnalysis('');throw error;}
+      if(error.status===401||error.status===403)throw error;
+      if(++failures>=6)throw new Error('暂时无法读取分析进度，任务可能仍在后台运行。请点击“继续查看分析进度”；无需重复提交图片。');
+      analysisProgress('连接暂时中断，正在重新读取后台分析进度…');
+      await new Promise(resolve=>setTimeout(resolve,2000));continue;
+    }
+    analysisProgress(`${job.progress||'千问正在分析'} · 已用时 ${Math.floor(job.elapsed_ms/1000)} 秒`);
+    if(job.status==='failed'){rememberAnalysis('');throw new Error(job.error);}
+    if(job.status==='completed'){
+      const draft=await api('/api/drafts/'+job.draft_id);rememberAnalysis('');return draft;
+    }
+    await new Promise(resolve=>setTimeout(resolve,1500));
+  }
+}
+async function resumeAnalysis(){
+  if(state.busy||!analysisJobId)return;
+  busy(true);$('analysis-error').hidden=true;analysisProgress('正在恢复后台分析进度…');
+  try{const draft=await waitForAnalysis(analysisJobId);analysisProgress('');openReview(draft);await refreshDrafts();}
+  catch(error){analysisProgress('');$('analysis-error').textContent=error.message;$('analysis-error').hidden=false;toast(error.message,true);}
+  finally{busy(false);}
+}
 $('analyze-btn').onclick=async()=>{
+  if(analysisJobId)return resumeAnalysis();
   if(state.busy)return;const text=$('message-input').value.trim();if(!text && !state.files.length)return toast('先上传截图或输入原文',true);
   if(!state.status.qwen_configured){settings();return;}
   const customer_id=state.selected,shipment_id=state.shipment;busy(true);$('analysis-error').hidden=true;$('analysis-error').textContent='';
-  try{const images=await Promise.all(state.files.map(x=>fileData(x.file)));const draft=await post('/api/analyze',{text,images,customer_id,shipment_id});openReview(draft);await refreshDrafts();}
-  catch(e){$('analysis-error').textContent=e.message;$('analysis-error').hidden=false;toast(e.message,true);}finally{busy(false);}
+  analysisProgress('正在上传截图并创建分析任务…');
+  try{
+    const images=await Promise.all(state.files.map(x=>fileData(x.file)));
+    let draft=await post('/api/analyze',{text,images,customer_id,shipment_id,async:true});
+    if(draft.job_id){rememberAnalysis(draft.job_id);draft=await waitForAnalysis(draft.job_id);}
+    analysisProgress('');openReview(draft);await refreshDrafts();
+  }
+  catch(e){analysisProgress('');$('analysis-error').textContent=e.message;$('analysis-error').hidden=false;toast(e.message,true);}finally{busy(false);}
 };
 async function demo(){try{const d=await post('/api/demo',{});openReview(d);await refreshDrafts();}catch(e){toast(e.message,true);}}
 $('demo-btn').onclick=demo;
@@ -472,7 +514,7 @@ $('login-form').onsubmit=async e=>{e.preventDefault();try{await post('/api/login
 $('login-dialog').addEventListener('cancel',e=>e.preventDefault());
 $('logout-btn').onclick=async()=>{try{await post('/api/logout',{});location.reload();}catch(e){toast(e.message,true);}};
 async function init(){
-  try{state.status=await api('/api/status');renderModelStatus();$('logout-btn').hidden=!state.status.password_required;if(!state.status.authenticated){if(!$('login-dialog').open)$('login-dialog').showModal();return;}await refreshCustomers();await refreshDrafts();renderReplies(state.detail?.latest);if(location.hash==='#settings')await settings();}
+  try{state.status=await api('/api/status');renderModelStatus();$('logout-btn').hidden=!state.status.password_required;if(!state.status.authenticated){if(!$('login-dialog').open)$('login-dialog').showModal();return;}await refreshCustomers();await refreshDrafts();renderReplies(state.detail?.latest);if(location.hash==='#settings')await settings();if(analysisJobId)void resumeAnalysis();}
   catch(e){toast(e.message,true);}
 }
 const intelUI=initIntelligence({api,post,toast,showSmall,copy,getState:()=>state});

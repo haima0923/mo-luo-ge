@@ -55,6 +55,7 @@ body{display:grid;grid-template-rows:auto auto minmax(0,1fr);height:100vh;height
 .image-thumb img{width:48px;height:52px}
 .image-thumb button{top:0;right:0;width:20px;height:20px}
 .analysis-error{font-size:13px;line-height:1.6;max-height:64px;overflow:auto;overscroll-behavior:contain;margin:6px 0}
+.analysis-progress{font-size:13px;line-height:1.6;color:#185c48;background:#eef7f1;border-radius:6px;padding:6px 10px;margin:6px 0;max-height:56px;overflow:auto}
 .reply-panel #replies{flex:1 1 0;height:auto;min-height:0;max-height:none;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:22px 22px;font-size:14px}
 .reply-panel .reply-head{gap:14px;margin-bottom:18px}
 .reply-panel .reply-head h3{font-size:16px}

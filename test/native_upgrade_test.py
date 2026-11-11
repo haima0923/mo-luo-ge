@@ -58,13 +58,13 @@ class UpgradeTest(unittest.TestCase):
              patch.object(installer, 'website_status', return_value=(200, None)), \
              patch.object(installer, 'backup') as backup, \
              patch.object(installer, 'run', side_effect=self.record_command), \
-             patch.object(installer, 'wait_for_app', return_value={'version': '0.3.8'}), \
+             patch.object(installer, 'wait_for_app', return_value={'version': '0.3.9'}), \
              patch.object(installer, 'check_navigation') as navigation:
             installer.upgrade()
         release = (self.base / 'current').resolve()
         self.assertNotEqual(release, self.old)
-        self.assertTrue(release.name.startswith('v0.3.8-'))
-        self.assertEqual(json.loads((release / 'package.json').read_text())['version'], '0.3.8')
+        self.assertTrue(release.name.startswith('v0.3.9-'))
+        self.assertEqual(json.loads((release / 'package.json').read_text())['version'], '0.3.9')
         self.assertEqual((release / 'lib/qwen.mjs').read_bytes(), (ROOT / 'lib/qwen.mjs').read_bytes())
         self.assertFalse((release / '.git').exists())
         self.assertFalse((release / 'data').exists())
@@ -89,8 +89,8 @@ class UpgradeTest(unittest.TestCase):
         self.assertEqual(self.calls.count(['systemctl', 'restart', 'morocco-ai-crm']), 2)
         self.check_private_files()
 
-    def test_038_is_idempotent_without_backup_or_restart(self):
-        with patch.object(installer, 'app_status', return_value={'version': '0.3.8'}), \
+    def test_039_is_idempotent_without_backup_or_restart(self):
+        with patch.object(installer, 'app_status', return_value={'version': '0.3.9'}), \
              patch.object(installer, 'run') as run, patch.object(installer, 'backup') as backup:
             installer.upgrade()
         run.assert_not_called()
@@ -99,7 +99,7 @@ class UpgradeTest(unittest.TestCase):
         self.check_private_files()
 
     def test_status_accepts_old_and_new_versions_but_requires_password(self):
-        for version in ('0.2.4', '0.2.5', '0.2.6', '0.3.0', '0.3.1', '0.3.2', '0.3.3', '0.3.4', '0.3.5', '0.3.6', '0.3.7', '0.3.8'):
+        for version in ('0.2.4', '0.2.5', '0.2.6', '0.3.0', '0.3.1', '0.3.2', '0.3.3', '0.3.4', '0.3.5', '0.3.6', '0.3.7', '0.3.8', '0.3.9'):
             with self.subTest(version=version), patch.object(installer.http.client, 'HTTPConnection') as connection:
                 result = connection.return_value.getresponse.return_value
                 result.status = 200
