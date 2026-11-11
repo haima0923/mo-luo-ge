@@ -13,6 +13,7 @@ import { createIntelligenceAnalyzer,extractIntelligenceQuery } from './lib/intel
 import { chatDate } from './lib/intelligence.mjs';
 import { createReplyEditor,replyEditState,replyEditContextRevision,originalReplyRevision,EDITABLE_REPLY_STYLES } from './lib/reply-edit.mjs';
 import { createSuggestedReplyTranslator,replyTranslationState,replyLanguageSource,replySourceRevision } from './lib/reply-language.mjs';
+import { loginAddress, LoginLimiter } from './lib/login.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const loopback = h => ['127.0.0.1', 'localhost', '::1'].includes(h);
@@ -20,7 +21,7 @@ export function readConfig(env = process.env) {
   const host = env.HOST || '127.0.0.1', password = env.APP_PASSWORD || '', origin = env.APP_ORIGIN || '';
   if (!loopback(host) && (password.length < 12 || !origin)) throw new Error('非本机访问必须配置至少12位 APP_PASSWORD 和 APP_ORIGIN；请通过 HTTPS 反向代理访问。');
   return {
-    host, port: Number(env.PORT || 3000), password, origin,
+    host, port: Number(env.PORT || 3000), password, origin, sessionSecret: env.APP_SESSION_SECRET || password,
     dataDir: resolve(root, env.DATA_DIR || './data'),
     apiKey: env.DASHSCOPE_API_KEY || '', baseUrl: env.DASHSCOPE_BASE_URL || '',
     model: env.QWEN_MODEL || 'qwen3.7-plus', thinking: env.QWEN_ENABLE_THINKING === 'true',
@@ -44,8 +45,8 @@ export function createApp(config = readConfig(), options = {}) {
   const store = options.store || new Store(config.dataDir), settings = new QwenSettings(config);
   const analyze = options.analyze || (input => createQwen(settings.config(), options.qwenFetcher)(input));
   let testingQwen = false;
-  const sign = timestamp => createHmac('sha256', config.password).update(timestamp).digest('hex');
-  const attempts = new Map();
+  const sign = timestamp => createHmac('sha256', config.sessionSecret || config.password).update(timestamp).digest('hex');
+  const loginLimiter = new LoginLimiter(options.loginNow);
   const active = new Set();
   const intelligenceJobs=new Map();
   const analysisJobs=new Map();
@@ -107,18 +108,22 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.9'
+        model: settings.view().model, version: '0.3.10'
       });
       if (method === 'POST' && path === '/api/login') {
-        const ip = req.socket.remoteAddress || 'local', entry = attempts.get(ip) || { count: 0, until: 0 };
-        if (entry.until > Date.now()) throw new HttpError(429, '尝试次数过多，请一分钟后重试。');
-        const body = await readJson(req), password = str(body.password, 1000);
+        const body = await readJson(req), password = body.password;
+        if(typeof password!=='string'||password.length>1000)throw new HttpError(400,'请填写有效的访问密码。');
+        const ip = loginAddress(req,config);
+        const locked=seconds=>send(429,{error:`尝试次数过多，请 ${seconds} 秒后重试。`,retry_after:seconds},{'Retry-After':String(seconds)});
+        const remaining=loginLimiter.remaining(ip);
+        if(remaining)return locked(remaining);
         const digest = v => createHash('sha256').update(v).digest();
         if (!timingSafeEqual(digest(password), digest(config.password))) {
-          entry.count++; if (entry.count >= 5) { entry.until = Date.now() + 60000; entry.count = 0; }
-          attempts.set(ip, entry); throw new HttpError(401, '密码不正确。');
+          const remaining=loginLimiter.failed(ip);
+          if(remaining)return locked(remaining);
+          throw new HttpError(401, '密码不正确，请检查大小写、空格及浏览器自动填充。');
         }
-        attempts.delete(ip);
+        loginLimiter.succeeded(ip);
         const ts = String(Date.now());
         return send(200, { ok: true }, { 'Set-Cookie': `crm_session=${ts}.${sign(ts)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800${origin.startsWith('https:') ? '; Secure' : ''}` });
       }

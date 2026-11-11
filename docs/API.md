@@ -146,3 +146,9 @@ v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登�
 登录后 `GET /api/analysis/jobs/:id` 返回job_id、status（running/completed/failed）、customer_id、shipment_id、started_at、elapsed_ms、progress。completed带draft_id，通过原 `GET /api/drafts/:id` 读取持久草稿；failed带清理过的error及status_code，不返回上游正文、密钥、图片或部分分析。该接口沿用Host、同源与登录保护，阶段进度不会包含客户原文。完成前不保存部分草稿或归档消息。
 
 任务状态在进程内保留，提交时清理超过30分钟或超过100条的已结束状态；完成的草稿不随状态清理而删除。重启后未知状态返回404并提示先查待审核草稿。前端仅在当前标签页sessionStorage保存job_id供刷新恢复，不保存图片、原文或密钥；轮询网络失败不会再次POST分析。
+
+## 登录（v0.3.10）
+
+`POST /api/login` 的password必须为字符串、最长1000字符，按保存值精确比较，不做空格裁剪或大小写转换。相同来源一分钟内第五次错误及冷却期间返回429，JSON含error和retry_after秒数，并带Retry-After头；冷却结束可重新提交，成功清除本来源失败记录。无密码的本机演示仍兼容。
+
+原生Nginx已配置 `X-Forwarded-For $proxy_add_x_forwarded_for`。仅连接来自127.0.0.1/::1且配置APP_ORIGIN时，应用取追加链最后一个有效IP作登录限流身份，不能以前面可伪造的地址绕过；非本机直连/未配置站点时仅用socket地址。此逻辑不信任任意远程代理。

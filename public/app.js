@@ -14,7 +14,7 @@ async function api(path,options={}){
   try{value=await response.json();}catch{
     const error=new Error([502,503,504].includes(response.status)?`网站连接暂时中断（HTTP ${response.status}），请稍后重试。`:`网站返回了无法读取的响应（HTTP ${response.status}），请稍后重试。`);error.status=response.status;throw error;
   }
-  if(!response.ok){if(response.status===401 && !path.includes('/login')&&!$('login-dialog').open)$('login-dialog').showModal();const error=new Error(value.error||'请求失败');error.status=response.status;throw error;}
+  if(!response.ok){if(response.status===401 && !path.includes('/login')&&!$('login-dialog').open)$('login-dialog').showModal();const error=new Error(value.error||'请求失败');error.status=response.status;error.retryAfter=Number(value.retry_after||response.headers.get('Retry-After'))||0;throw error;}
   return value;
 }
 const post=(path,value)=>api(path,{method:'POST',body:JSON.stringify(value)});
@@ -510,7 +510,24 @@ async function settings(){
 $('settings-btn').onclick=()=>{if(location.hash==='#settings')settings();else location.hash='settings';};
 window.addEventListener('hashchange',()=>{if(location.hash==='#settings')settings();});
 $('small-dialog').addEventListener('close',()=>{if($('qwen-form')){$('qwen-key').value='';$('small-body').innerHTML='';if(location.hash==='#settings')history.replaceState(null,'',location.pathname+location.search);}});
-$('login-form').onsubmit=async e=>{e.preventDefault();try{await post('/api/login',Object.fromEntries(new FormData(e.target)));$('login-dialog').close();await init();}catch(e){$('login-error').textContent=e.message;}};
+let loginBusy=false,loginUntil=0,loginTimer;
+function loginState(){
+  const remaining=Math.max(0,Math.ceil((loginUntil-Date.now())/1000)),button=$('login-submit');
+  button.disabled=loginBusy||remaining>0;button.textContent=loginBusy?'正在登录…':remaining?`请等待 ${remaining} 秒`:'登录';
+  if(remaining)$('login-error').textContent=`尝试次数过多，请 ${remaining} 秒后重试。`;
+  else if(loginTimer){clearInterval(loginTimer);loginTimer=null;$('login-error').textContent='等待已结束，请重新输入密码后登录。';}
+}
+$('login-form').onsubmit=async e=>{
+  e.preventDefault();if(loginBusy||loginUntil>Date.now())return;
+  loginBusy=true;$('login-error').textContent='';loginState();
+  try{
+    await post('/api/login',Object.fromEntries(new FormData(e.target)));
+    e.target.reset();$('login-error').textContent='';$('login-dialog').close();await init();
+  }catch(error){
+    $('login-error').textContent=error.message;
+    if(error.status===429){loginUntil=Date.now()+Math.max(1,Math.min(60,error.retryAfter||60))*1000;clearInterval(loginTimer);loginTimer=setInterval(loginState,1000);}
+  }finally{loginBusy=false;loginState();}
+};
 $('login-dialog').addEventListener('cancel',e=>e.preventDefault());
 $('logout-btn').onclick=async()=>{try{await post('/api/logout',{});location.reload();}catch(e){toast(e.message,true);}};
 async function init(){

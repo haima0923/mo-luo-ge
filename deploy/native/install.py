@@ -206,7 +206,7 @@ def app_status():
         connection.request('GET', '/api/status', headers={'Host': DOMAIN})
         response = connection.getresponse()
         body = json.loads(response.read())
-        if response.status != 200 or body.get('version') not in ('0.2.0', '0.2.1', '0.2.2', '0.2.3', '0.2.4', '0.2.5', '0.2.6', '0.3.0', '0.3.1', '0.3.2', '0.3.3', '0.3.4', '0.3.5', '0.3.6', '0.3.7', '0.3.8', '0.3.9') or not body.get('password_required'):
+        if response.status != 200 or body.get('version') not in ('0.2.0', '0.2.1', '0.2.2', '0.2.3', '0.2.4', '0.2.5', '0.2.6', '0.3.0', '0.3.1', '0.3.2', '0.3.3', '0.3.4', '0.3.5', '0.3.6', '0.3.7', '0.3.8', '0.3.9', '0.3.10') or not body.get('password_required'):
             raise RuntimeError('应用版本或密码保护检查失败。')
         return body
     finally:
@@ -261,6 +261,60 @@ def ask_password():
             print('两次密码不同；请重新输入。', flush=True)
             continue
         return password
+
+def check_password_login(password):
+    connection = http.client.HTTPConnection('127.0.0.1', PORT, timeout=8)
+    try:
+        connection.request('POST', '/api/login', body=json.dumps({'password': password}),
+                           headers={'Host': DOMAIN, 'Content-Type': 'application/json'})
+        response = connection.getresponse()
+        response.read(8192)
+        cookie = response.getheader('Set-Cookie', '').split(';')[0]
+        if response.status != 200 or not cookie.startswith('crm_session='):
+            raise RuntimeError('新密码实际登录验证失败。')
+        connection.request('GET', '/api/status', headers={'Host': DOMAIN, 'Cookie': cookie})
+        response = connection.getresponse()
+        status = json.loads(response.read(8192))
+        if response.status != 200 or not status.get('authenticated') or not status.get('password_required'):
+            raise RuntimeError('登录会话验证失败。')
+    finally:
+        connection.close()
+
+def reset_password(password=None):
+    """Change only the private password, restart, verify login or roll back."""
+    if password is None:
+        password = getpass.getpass('新访问密码（至少8位，输入不显示）: ')
+        if password != getpass.getpass('再次输入新密码: '):
+            raise RuntimeError('两次密码不同，未修改。')
+    if not isinstance(password, str) or not 8 <= len(password) <= 1000 or any(c in password for c in '\r\n\0'):
+        raise RuntimeError('新密码需8—1000位，且不能包含换行或空字符；未修改。')
+    environment = CONFIG / 'app.env'
+    if environment.is_symlink() or not environment.is_file() or not SERVICE_UNIT.is_file():
+        raise RuntimeError('已有服务或私有配置异常，未修改。')
+    managed(SERVICE_UNIT)
+    app_status()
+    previous = environment.read_text()
+    backup_path = CONFIG / ('app.env.before-password-' + os.urandom(8).hex())
+    atomic(backup_path, previous, 0o600)
+    lines = [line for line in previous.splitlines(keepends=True)
+             if not re.match(r'^\s*(?:APP_PASSWORD|APP_SESSION_SECRET)\s*=', line)]
+    updated = ''.join(lines)
+    if updated and not updated.endswith('\n'):
+        updated += '\n'
+    quoted = '"' + password.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    updated += 'APP_PASSWORD=' + quoted + '\nAPP_SESSION_SECRET="' + os.urandom(32).hex() + '"\n'
+    atomic(environment, updated, 0o600)
+    try:
+        run(['systemctl', 'restart', 'morocco-ai-crm'])
+        wait_for_app()
+        check_navigation()
+        check_password_login(password)
+    except Exception:
+        atomic(environment, previous, 0o600)
+        run(['systemctl', 'restart', 'morocco-ai-crm'])
+        raise RuntimeError('新密码或服务校验未通过，已恢复原配置并重启；请检查服务状态。') from None
+    print('密码已重置并通过实际登录和会话验证，旧登录状态及此前的错误次数已清除。')
+    print('客户资料、聊天、截图和千问Key保留。旧配置私有备份：' + str(backup_path))
 
 def wait_for_app():
     for attempt in range(20):
@@ -363,8 +417,8 @@ def upgrade():
     previous_release = current.resolve()
     previous_unit = SERVICE_UNIT.read_text()
     status = app_status()
-    if status['version'] == '0.3.9':
-        print('v0.3.9 图片后台分析与流式接收已安装：https://' + DOMAIN)
+    if status['version'] == '0.3.10':
+        print('v0.3.10 登录修复与密码重置工具已安装：https://' + DOMAIN)
         return
     if not (APPLICATION / 'lib/references.mjs').is_file():
         raise RuntimeError('升级包缺少公共资料库源码。')
@@ -372,7 +426,7 @@ def upgrade():
     node = Path(state['node'])
     run([node, '--test', *sorted((APPLICATION / 'test').glob('*.test.mjs'))], cwd=APPLICATION)
     backup()
-    release = Path(tempfile.mkdtemp(prefix='v0.3.9-', dir=BASE / 'releases'))
+    release = Path(tempfile.mkdtemp(prefix='v0.3.10-', dir=BASE / 'releases'))
     def omit(directory, names):
         excluded = {'.git', '.env', 'data', 'backups', 'node_modules', 'test-results', '__pycache__'}
         if Path(directory).resolve() == PACKAGE:
@@ -394,7 +448,7 @@ def upgrade():
         atomic(SERVICE_UNIT, render_service(node))
         run(['systemctl', 'daemon-reload'])
         run(['systemctl', 'restart', 'morocco-ai-crm'])
-        if wait_for_app()['version'] != '0.3.9':
+        if wait_for_app()['version'] != '0.3.10':
             raise RuntimeError('新版本检查失败。')
         check_navigation()
         if website_status() != before:
@@ -406,7 +460,7 @@ def upgrade():
         run(['systemctl', 'restart', 'morocco-ai-crm'])
         raise
     atomic(BASE / 'manage.py', Path(__file__).read_text())
-    print('已更新至v0.3.9：图片分析转为后台任务并显示进度，千问结果流式接收，超时与网络错误分别提示；千问Key、密码、客户数据、证书和原官网配置均已保留。')
+    print('已更新至v0.3.10：修复代理访问共享登录锁定和密码空格校验，增加安全重置与真实登录验证；千问Key、密码、客户数据、证书和原官网配置均已保留。')
     print('打开 https://' + DOMAIN + ' 查看新功能。')
 
 def resume():
@@ -471,7 +525,7 @@ def install():
     runtime = BASE / 'runtime' / staged_node.parent.parent.name
     shutil.copytree(staged_node.parent.parent, runtime)
     node = runtime / 'bin/node'
-    source = BASE / 'releases/v0.3.9'
+    source = BASE / 'releases/v0.3.10'
     def omit(directory, names):
         excluded = {'.git', '.env', 'data', 'backups', 'node_modules', 'test-results', '__pycache__'}
         if Path(directory).resolve() == PACKAGE:
@@ -601,9 +655,10 @@ def main():
     parser.add_argument('--https', action='store_true')
     parser.add_argument('--status', action='store_true')
     parser.add_argument('--backup', action='store_true')
+    parser.add_argument('--reset-password', action='store_true')
     args = parser.parse_args()
-    if sum((args.install, args.resume, args.repair_certbot, args.repair_navigation, args.upgrade, args.https, args.status, args.backup)) != 1:
-        parser.error('请选择 --install / --resume / --upgrade / --repair-navigation / --repair-certbot / --https / --status / --backup')
+    if sum((args.install, args.resume, args.repair_certbot, args.repair_navigation, args.upgrade, args.https, args.status, args.backup, args.reset_password)) != 1:
+        parser.error('请选择 --install / --resume / --upgrade / --repair-navigation / --repair-certbot / --https / --status / --backup / --reset-password')
     if os.geteuid() != 0:
         raise RuntimeError('请以root执行。')
     if args.install:
@@ -620,6 +675,8 @@ def main():
         https()
     elif args.backup:
         backup()
+    elif args.reset_password:
+        reset_password()
     else:
         result = app_status()
         print(json.dumps({k: result.get(k) for k in ('version', 'password_required', 'qwen_configured')}, ensure_ascii=False))
