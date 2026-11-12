@@ -108,7 +108,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.11'
+        model: settings.view().model, version: '0.3.12'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;
@@ -138,7 +138,7 @@ export function createApp(config = readConfig(), options = {}) {
         if(path==='/api/intelligence/messages'&&method==='GET')return send(200,intel.messages(url.searchParams.get('group_id')||'',Object.fromEntries(url.searchParams)));
         if(path==='/api/intelligence/inquiries'&&method==='GET')return send(200,intel.search(url.searchParams.get('q')||'',Object.fromEntries(url.searchParams)));
         if(path==='/api/intelligence/match'&&method==='POST'){
-          const body=await readJson(req);return send(200,intel.search(str(body.query||'',3000),{limit:8}));
+          const body=await readJson(req);return send(200,intel.search(str(body.query||'',3000),{limit:body.limit??8,offset:body.offset??0}));
         }
         const groupMatch=path.match(new RegExp(`^/api/intelligence/groups/(${idPattern})/messages$`));
         if(groupMatch&&method==='GET')return send(200,intel.messages(groupMatch[1],Object.fromEntries(url.searchParams)));

@@ -3,12 +3,19 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 const statusText=item=>item.quote_count?'已有报价':item.review_count?'待核对关联':item.reply_count?'已回复 · 尚未报价':'尚未找到报价';
 const atText=value=>value==='yes'?'已 @询价者':value==='no'?'未 @询价者':'@归属待核对';
 const when=m=>[m.visible_date||'日期未确认',m.visible_time].filter(Boolean).join(' ');
+const matchText={exact:'精准匹配',alias:'同义产品',fuzzy:'名称相近',name:'名称相关',category:'同类参考',text:'文字相关'};
+const categoryText=item=>(item.categories||[]).map(c=>c.path.join(' › ')).join('；');
+function matchSummary(result){
+  if(!result.query)return '';
+  const classes=(result.query_categories||[]).map(c=>c.path.join(' › '));
+  return `<p class="intel-note intel-match-summary">${classes.length?'归类参考：'+classes.map(esc).join('；')+'。':''}产品名称和别名优先，同类历史报价随后；同类价格不等于当前产品价格。</p>`;
+}
 export function initIntelligence({api,post,toast,showSmall,copy,getState}){
   document.body.insertAdjacentHTML('beforeend',`
     <dialog id="intelligence-dialog" class="intelligence-dialog" aria-labelledby="intel-title"><div class="dialog-head"><div><span class="eyebrow">GROUP INQUIRY KNOWLEDGE</span><h2 id="intel-title">数据库智库</h2></div><button type="button" id="intel-close" class="icon-button" aria-label="关闭数据库智库">×</button></div>
       <div class="intel-controls"><div class="intel-toolbar"><select id="intel-group" aria-label="微信群筛选"><option value="">全部微信群</option></select><button type="button" id="intel-new-group" class="button quiet">＋ 新建群</button><button type="button" id="intel-import" class="button primary">上传群聊截图</button></div>
       <p class="intel-note">同一群分批导入，可累计每天的聊天。未报价表示当前已导入并确认的记录中尚未找到报价；身份、@与回复归属需核对。</p>
-      <div class="intel-toolbar"><input id="intel-search" aria-label="搜索智库" placeholder="产品、规格、询价内容或产品别名"><select id="intel-status" aria-label="报价状态"><option value="">全部询价</option><option value="unquoted">尚未找到报价</option><option value="quoted">已有报价</option><option value="needs_review">关联待核对</option></select><button id="intel-search-btn" type="button" class="button quiet">搜索</button></div>
+      <div class="intel-toolbar"><input id="intel-search" aria-label="搜索智库" placeholder="产品、类目、规格或别名，如花洒、五金"><select id="intel-status" aria-label="报价状态"><option value="">全部询价</option><option value="unquoted">尚未找到报价</option><option value="quoted">已有报价</option><option value="needs_review">关联待核对</option></select><button id="intel-search-btn" type="button" class="button quiet">搜索</button></div><div id="intel-search-summary"></div>
       <div class="intel-tabs"><button type="button" data-intel-tab="inquiries" class="active">产品询价</button><button type="button" data-intel-tab="messages">全部聊天</button><button type="button" data-intel-tab="drafts">待审核导入</button></div></div>
       <div id="intel-list" class="intel-list"></div><div class="intel-pager"><button id="intel-prev" class="button quiet">上一页</button><span id="intel-count"></span><button id="intel-next" class="button quiet">下一页</button></div>
     </dialog>
@@ -44,14 +51,15 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
     const version=++view.version,group=$('intel-group').value,q=$('intel-search').value.trim();
     $('intel-list').innerHTML='<p class="memory-meta">正在读取智库…</p>';
     try{
-      let items,total;
+      let items,total,metadata={};
       if(view.tab==='drafts'){items=view.drafts.filter(d=>!group||d.group_id===group);total=items.length;items=items.slice(view.offset,view.offset+30);}
       else{
         const path=view.tab==='messages'?'/api/intelligence/messages':'/api/intelligence/inquiries';
-        const result=await api(path+'?'+new URLSearchParams({group_id:group,q,status:$('intel-status').value,limit:'30',offset:String(view.offset)}));items=result.items;total=result.total;
+        const result=await api(path+'?'+new URLSearchParams({group_id:group,q,status:$('intel-status').value,limit:'30',offset:String(view.offset)}));items=result.items;total=result.total;metadata=result;
       }
       if(version!==view.version||!$('intelligence-dialog').open)return;
       view.total=total;
+      $('intel-search-summary').innerHTML=view.tab==='inquiries'?matchSummary(metadata):'';
       $('intel-list').innerHTML=items.length?items.map(item=>view.tab==='drafts'?`<article class="intel-card"><strong>${esc(item.group_name)}</strong><p>${esc(item.chat_date||'日期待确认')} · ${esc(new Date(item.created_at).toLocaleString('zh-CN'))}</p><div class="intel-actions"><button data-intel-draft="${item.id}" class="button quiet">继续审核</button><button data-intel-delete-draft="${item.id}" class="button quiet">删除草稿</button></div></article>`:view.tab==='messages'?messageCard(item,true):inquiryCard(item)).join(''):'<p class="memory-empty">没有符合条件的记录。请新建或选择微信群，上传截图并确认归档。</p>';
       $('intel-count').textContent=`共 ${total} ${view.tab==='messages'?'条消息':'项'} · ${total?view.offset+1:0}—${Math.min(view.offset+30,total)}`;
       $('intel-prev').disabled=view.offset===0;$('intel-next').disabled=view.offset+30>=total;
@@ -68,7 +76,8 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
   function messageCard(m,editable=false){return `<article class="intel-message"><div class="intel-message-head"><strong>${esc(m.sender)}</strong><span>${esc(m.group_name||'')} · ${esc(when(m))}</span>${m.uncertain?'<span class="warning-tag">识别待核对</span>':''}</div><p class="intel-original" dir="auto">${esc(m.original)}</p>${m.chinese?`<p class="intel-chinese">${esc(m.chinese)}</p>`:''}${m.products.length?`<p class="intel-note">询价产品：${m.products.map(p=>esc(p.name+' '+p.specs)).join('；')}</p>`:''}${m.offers.map(offerHtml).join('')}<div class="intel-actions">${(m.screenshots||[]).map((image,i)=>`<button type="button" class="text-button" data-intel-image="${image.id}">原始截图 ${i+1}</button>`).join('')}${editable?`<button type="button" class="text-button" data-intel-edit="${m.id}">校对此消息</button><button type="button" class="text-button" data-intel-history="${m.id}">校对历史</button><button type="button" class="text-button" data-intel-use-reply="${m.id}">关联为回复 / 报价</button>`:''}</div></article>`;}
   function inquiryCard(item){
     const confirmed=item.links.filter(l=>l.state==='confirmed'&&l.offer),last=confirmed.at(-1);
-    return `<article class="intel-card"><div class="intel-card-title"><strong>${esc(item.product)}</strong><span class="intel-status ${item.quote_count?'quoted':'unquoted'}">${statusText(item)}</span></div><p>${esc(item.specs||'未注明完整规格')}</p><p class="intel-note">${esc(item.group_name)} · ${esc(item.message.sender)} · ${esc(when(item.message))}</p><p class="intel-excerpt">${esc(item.message.original)}</p>${last?`<p class="intel-note">回复者：${esc(last.reply.sender)} · ${atText(last.at_status)}</p>${offerHtml(last.offer)}`:''}<div class="intel-actions"><button type="button" data-intel-inquiry="${item.id}" class="button quiet">查看询价与全部回复</button>${last?`<button type="button" data-intel-copy="${item.id}" class="button quiet">复制历史报价参考</button>`:''}</div></article>`;
+    const label=matchText[item.match?.kind],categories=categoryText(item);
+    return `<article class="intel-card"><div class="intel-card-title"><strong>${esc(item.product)}</strong><span class="intel-status ${item.quote_count?'quoted':'unquoted'}">${statusText(item)}</span></div>${label?`<span class="intel-match-tag" title="${esc(item.match.reason)}">${esc(label)}${item.match.category?' · '+esc(item.match.category.name):''}</span>`:''}${categories?`<p class="intel-note intel-category">归类参考：${esc(categories)}</p>`:''}<p>${esc(item.specs||'未注明完整规格')}</p><p class="intel-note">${esc(item.group_name)} · ${esc(item.message.sender)} · ${esc(when(item.message))}</p><p class="intel-excerpt">${esc(item.message.original)}</p>${last?`<p class="intel-note">回复者：${esc(last.reply.sender)} · ${atText(last.at_status)}</p>${offerHtml(last.offer)}`:''}<div class="intel-actions"><button type="button" data-intel-inquiry="${item.id}" class="button quiet">查看询价与全部回复</button>${last?`<button type="button" data-intel-copy="${item.id}" class="button quiet">复制历史报价参考</button>`:''}</div></article>`;
   }
   function bindCards(root){
     root.querySelectorAll('[data-intel-image]').forEach(b=>b.onclick=()=>{$('intel-source-image').src='/api/intelligence/images/'+b.dataset.intelImage;if(!$('intel-image-dialog').open)$('intel-image-dialog').showModal();});
@@ -177,7 +186,7 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
     const root=$('intelligence-matches');if(!root)return;
     const state=getState(),id=state.selected,shipment=state.shipment,scope=(id||'new')+':'+(shipment||''),version=++matchVersion;matchScope=scope;
     const explicit=options.query??manualQueries.get(scope),productTerms=analysis?.stale?[]:analysis?.product_terms||[];
-    root.innerHTML=`<div class="memory-section-head"><h3>智库 · 相似产品询价</h3><button type="button" id="intel-open-from-reply" class="text-button">打开智库 ↗</button></div><p class="intel-note">群聊历史仅供参考，需核对规格、币种、数量、费用范围及有效期。</p><form id="intel-match-form" class="intel-match-form"><input id="intel-match-query" aria-label="检索历史询价产品" maxlength="3000" value="${esc(explicit||'')}" placeholder="输入产品或别名"><button class="button quiet">查询</button></form><button id="intel-smart-match" type="button" class="text-button" ${id?'':'disabled'}>从当前聊天智能提取产品并匹配</button><div id="intel-match-results"><p class="memory-meta">正在检索历史记录…</p></div>`;
+    root.innerHTML=`<div class="memory-section-head"><h3>智库 · 相似产品询价</h3><button type="button" id="intel-open-from-reply" class="text-button">打开智库 ↗</button></div><p class="intel-note">群聊历史仅供参考，需核对规格、币种、数量、费用范围及有效期。</p><form id="intel-match-form" class="intel-match-form"><input id="intel-match-query" aria-label="检索历史询价产品" maxlength="3000" value="${esc(explicit||'')}" placeholder="输入产品、类目或别名，如花洒、五金"><button class="button quiet">查询</button></form><button id="intel-smart-match" type="button" class="text-button" ${id?'':'disabled'}>从当前聊天智能提取产品并匹配</button><div id="intel-match-results"><p class="memory-meta">正在检索历史记录…</p></div>`;
     $('intel-open-from-reply').onclick=()=>$('intelligence-btn').click();
     $('intel-match-form').onsubmit=e=>{e.preventDefault();const query=$('intel-match-query').value.trim();manualQueries.set(scope,query);renderMatches(analysis,{query,refresh:true});};
     $('intel-smart-match').onclick=()=>renderMatches(analysis,{smart:true});
@@ -196,8 +205,23 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
       }
       if(!current())return;
       if(result.terms?.length)$('intel-match-query').value=result.terms.join(' ');
-      $('intel-match-results').innerHTML=result.items.length?result.items.map(inquiryCard).join(''):'<p class="memory-empty">尚无匹配记录。可以导入微信群询价，或输入产品中文名和别名检索。</p>';
-      bindCards($('intel-match-results'));
+      const shown=[...result.items];let nextOffset=(result.offset||0)+result.items.length;
+      const paint=()=>{
+        if(!current())return;
+        $('intel-match-results').innerHTML=matchSummary(result)+(shown.length?shown.map(inquiryCard).join('')+`<p class="intel-note">已显示 ${shown.length} / ${result.total} 项匹配记录</p>`:'<p class="memory-empty">尚无匹配记录。可以导入微信群询价，或输入产品、类目和别名检索。</p>')+
+          (nextOffset<result.total?'<button id="intel-match-more" type="button" class="button quiet">继续查看相似记录</button>':'');
+        bindCards($('intel-match-results'));
+        const more=$('intel-match-more');if(!more)return;
+        more.onclick=async()=>{
+          more.disabled=true;more.textContent='正在读取…';
+          try{
+            const page=await post('/api/intelligence/match',{query:result.query,limit:8,offset:nextOffset});if(!current())return;
+            const ids=new Set(shown.map(i=>i.id));shown.push(...page.items.filter(i=>!ids.has(i.id)));nextOffset+=page.items.length;
+            result={...result,total:page.total};if(!page.items.length)nextOffset=page.total;paint();
+          }catch(error){if(current()){more.disabled=false;more.textContent='继续查看相似记录';toast(error.message,true);}}
+        };
+      };
+      paint();
     }catch(error){if(current())$('intel-match-results').innerHTML=`<p class="error-text">${esc(error.message)}</p><p class="intel-note">可以直接输入产品名称查询已有智库记录。</p>`;}
   }
   return {renderMatches};

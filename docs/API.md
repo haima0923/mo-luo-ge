@@ -158,3 +158,11 @@ v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登�
 客户图片分析和智库导入使用逐张识别。单个图片/汇总/关联调用的可识别socket断连或SSE缺少完成标记最多重连1次，间隔500毫秒；两次尝试及间隔共用原AbortSignal和截止时间。不重连HTTP错误、超时、非法JSON或长度截断，第二次失败带已重连说明。半截输出丢弃，不拼接两次结果；完整结果仍通过既有来源/消息/金额/关联校验。
 
 `GET /api/intelligence/jobs/:id` 增加progress和elapsed_ms，终止状态增加finished_at；鉴权与返回状态不变。进度只包含固定阶段及计数，不含原文、密钥或上游响应正文。完成草稿warnings可包含已恢复的断连次数；失败仍不保存部分批次。
+
+## 智库产品归类检索（v0.3.12）
+
+`GET /api/intelligence/inquiries`、`POST /api/intelligence/match`及当前客户的`/intelligence`共用产品名、常见别名、有限拼写容错和类目检索。精确产品优先，同义/相近名称其次，同类记录随后；同属细分类目的记录优先于只同属上级类目的记录。仅以产品名称和明确别名推导归类，不以地址、发送者或材质推断。既有群过滤、active过滤、报价状态及同源登录校验保持。
+
+返回保留`total,items,query,tokens`，增加`limit,offset,query_categories,match_summary`。每个item增加`categories:[{id,name,path}]`和`match:{kind,rank,score,reason,category?}`，这些均是本次检索的参考元数据，不是原消息中的事实。kind为`exact/alias/fuzzy/name/category/text`；空搜索为`all`。只有不含已知产品/类目的检索才保留旧的原文关键词兜底，防止地址、材质制造产品相似关系。
+
+`POST /api/intelligence/match`接受`{query,limit?,offset?}`，默认8项，上限100；右侧查看更多使用同一query及offset，不再调用模型。当前客户GET/POST接口仍默认8项，继续查看使用返回query调用match。类目规则对全部有效产品索引计算，不截取最近1000条再检索；仅当前页展开完整消息、截图和价格。无数据库结构变更，历史原文和价格不被改写。
