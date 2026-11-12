@@ -79,6 +79,34 @@ test('超过一千条较新同类记录仍能找到最早的精准产品并正�
   assert.equal(store.search('五金',{limit:100,offset:1000}).items.length,3);
 });
 
+test('分类浏览按父类或细类严格筛选，数量跟随群、状态和搜索条件且不受分页影响',t=>{
+  const {store,group}=fixture(t);seed(store,group);
+  const other=store.createGroup({name:'合成隔离群'});add(store,other,'水龙头');
+  add(store,group,'型号ZZ',{quoted:false});add(store,group,'角阀',{quoted:false});
+  add(store,group,'混合类样品',{keywords:'五金 包装材料'});
+  const count=(r,id)=>r.category_facets.items.find(c=>c.id===id).count;
+  const root=store.search('',{group_id:group.id,category:'hardware',limit:3});
+  assert.equal(root.total,12);assert.equal(root.items.length,3);assert.equal(root.category_facets.total,17);
+  assert.equal(count(root,'hardware'),12);assert.equal(count(root,'plumbing'),6);assert.equal(count(root,'packaging'),1);
+  assert.equal(root.category_facets.uncategorized,1);
+  const child=store.search('',{group_id:group.id,category:'plumbing',limit:100});
+  assert.equal(child.total,6);assert.equal(count(child,'hardware'),12);assert.ok(child.items.every(q=>q.categories.some(c=>c.id==='plumbing')));
+  assert.ok(!child.items.some(q=>q.product==='智能门锁'));
+  assert.deepEqual([...root.items,...store.search('',{group_id:group.id,category:'hardware',limit:100,offset:3}).items].map(q=>q.id),store.search('',{group_id:group.id,category:'hardware',limit:100}).items.map(q=>q.id));
+  const quoted=store.search('',{group_id:group.id,category:'hardware',status:'quoted'});
+  assert.equal(quoted.total,11);assert.equal(count(quoted,'plumbing'),5);assert.equal(quoted.category_facets.uncategorized,0);
+  const search=store.search('花洒',{group_id:group.id,category:'plumbing'});
+  assert.equal(search.total,6);assert.equal(search.items[0].product,'不锈钢花洒套装');assert.equal(search.category_facets.total,12);
+  const unknown=store.search('',{group_id:group.id,category:'uncategorized'});
+  assert.deepEqual(unknown.items.map(q=>q.product),['型号ZZ']);
+  assert.equal(store.search('花洒',{group_id:group.id,category:'machinery'}).total,0);
+  assert.throws(()=>store.search('',{category:'bad-category'}),/有效的产品分类/);
+  const ask=unknown.items[0].message;
+  store.reviseMessage(ask.id,{...ask,products:[{name:'型号ZZ',specs:'',keywords:'五金'}]});
+  assert.equal(store.search('',{group_id:group.id,category:'uncategorized'}).total,0);
+  assert.equal(store.search('',{group_id:group.id,category:'hardware'}).total,13);
+});
+
 test('手动、聊天自动和智能提取使用相同归类排序；翻页不重复调用模型，当前客户与票隔离',async t=>{
   const data=mkdtempSync(join(tmpdir(),'crm-category-http-'));let calls=0,captured;
   const app=createApp(readConfig({HOST:'127.0.0.1',DATA_DIR:data,DASHSCOPE_API_KEY:'synthetic-category-key',DASHSCOPE_BASE_URL:'https://example.invalid/v1'}),{
@@ -89,6 +117,10 @@ test('手动、聊天自动和智能提取使用相同归类排序；翻页不�
   const origin='http://127.0.0.1:'+app.server.address().port;
   const call=async(path,body)=>{const response=await fetch(origin+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});assert.equal(response.status,200);return response.json();};
   const lib=app.store.intelligence,g=lib.createGroup({name:'合成历史群'});seed(lib,g);
+  const categorized=await call('/api/intelligence/inquiries?category=plumbing&group_id='+g.id+'&limit=2');
+  assert.equal(categorized.total,5);assert.equal(categorized.items.length,2);assert.equal(categorized.category,'plumbing');
+  assert.equal(categorized.category_facets.items.find(c=>c.id==='hardware').count,10);
+  assert.equal((await fetch(origin+'/api/intelligence/inquiries?category=invalid')).status,400);
   const a=app.store.createCustomer({name:'合成客户A'}),b=app.store.createCustomer({name:'合成客户B'}),s=app.store.createShipment(a.id,{title:'合成当前票'}),other=app.store.createShipment(a.id,{title:'合成另一票'});
   const put=(customerId,shipmentId,original,product_terms)=>{const analysis={...DEMO,product_terms,messages:[{...DEMO.messages[0],original,chinese:original}]};const d=app.store.saveDraft({customerId,shipmentId,analysis,images:[]});app.store.commit(d.id,{customerId,shipmentId,messages:analysis.messages,acceptedFacts:[]});};
   put(a.id,s.id,'需要花洒，pommeau de douche',['花洒']);put(b.id,null,'另一个客户私有文字',['卫浴五金']);put(a.id,other.id,'另一票私有文字',[]);

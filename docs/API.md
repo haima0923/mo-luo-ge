@@ -166,3 +166,9 @@ v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登�
 返回保留`total,items,query,tokens`，增加`limit,offset,query_categories,match_summary`。每个item增加`categories:[{id,name,path}]`和`match:{kind,rank,score,reason,category?}`，这些均是本次检索的参考元数据，不是原消息中的事实。kind为`exact/alias/fuzzy/name/category/text`；空搜索为`all`。只有不含已知产品/类目的检索才保留旧的原文关键词兜底，防止地址、材质制造产品相似关系。
 
 `POST /api/intelligence/match`接受`{query,limit?,offset?}`，默认8项，上限100；右侧查看更多使用同一query及offset，不再调用模型。当前客户GET/POST接口仍默认8项，继续查看使用返回query调用match。类目规则对全部有效产品索引计算，不截取最近1000条再检索；仅当前页展开完整消息、截图和价格。无数据库结构变更，历史原文和价格不被改写。
+
+## 智库分类浏览（v0.3.13）
+
+`GET /api/intelligence/inquiries`新增可选`category`，值为分类ID（如`hardware`、`plumbing`）或`uncategorized`；空值表示全部分类，未知ID返回400。父类包含所有子类；分类与`q/group_id/status`取交集，保留原搜索排序及分页。
+
+搜索返回新增`category`和`category_facets:{total,uncategorized,items:[{id,name,parent,count}]}`。数量在群、状态、搜索词及active过滤后、当前category过滤前统计，独立于limit/offset，因此可以直接切换同级分类；total按询价去重，count包含子类。同一商品可归属多个类目，各类count之和不保证等于total。零数量分类也保留在接口目录中；界面显示有记录的分类及当前选中的零数量分类，以便恢复筛选。无需新表或数据迁移，人工校对名称/别名后下一次查询即更新归类。
