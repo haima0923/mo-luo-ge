@@ -172,3 +172,11 @@ v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登�
 `GET /api/intelligence/inquiries`新增可选`category`，值为分类ID（如`hardware`、`plumbing`）或`uncategorized`；空值表示全部分类，未知ID返回400。父类包含所有子类；分类与`q/group_id/status`取交集，保留原搜索排序及分页。
 
 搜索返回新增`category`和`category_facets:{total,uncategorized,items:[{id,name,parent,count}]}`。数量在群、状态、搜索词及active过滤后、当前category过滤前统计，独立于limit/offset，因此可以直接切换同级分类；total按询价去重，count包含子类。同一商品可归属多个类目，各类count之和不保证等于total。零数量分类也保留在接口目录中；界面显示有记录的分类及当前选中的零数量分类，以便恢复筛选。无需新表或数据迁移，人工校对名称/别名后下一次查询即更新归类。
+
+## 智库时间筛选（v0.3.14）
+
+`GET /api/intelligence/inquiries`增加`period=all|7d|15d|30d|custom|unknown`（默认all）、`date_basis=quote|inquiry`（默认quote）。custom必须同时给出有效的`date_from/date_to=YYYY-MM-DD`且from≤to；其他period不能附带起止日期，无效参数返回400。预设范围以服务端计算的Asia/Shanghai今天为终点，含首尾及今天的7/15/30个自然日；未来日期不进入预设范围，custom可指定任何有效区间。
+
+quote仅以有效且confirmed的报价关联所指向的回复原消息visible_date为依据，不以询价日期、导入时间或链接创建时间兜底；普通回复和待核对报价不作为已确认报价。inquiry使用询价原消息visible_date。unknown匹配原日期缺失/无效的相应报价或询价；无报价的询价不会被当成“报价日期未确认”。时间条件和q/group_id/status/category取交集，分类统计在时间筛选之后、category筛选之前计算。
+
+返回`date_filter:{period,date_basis,date_from,date_to,today,timezone,active,unknown_total}`，unknown_total是当前q/group/status/category范围内涉及原日期未确认的询价数（all时为null），同一询价同时有已知/未知日期报价时仍只计一次。启用时间过滤的item增加`date_match:{basis,dates,quote_link_ids?}`，quote_link_ids是本次范围内命中的报价关联；完整links、金额、条款和原始来源保持，客户端按quote_link_ids展示/复制范围内各报价。日期范围内的多条报价只占一条询价计数，详情可展开全部历史。精准和相似匹配等级优先，相同匹配分数按命中的最近日期降序，之后保留创建时间/id稳定排序。

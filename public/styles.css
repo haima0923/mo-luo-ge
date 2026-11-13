@@ -206,6 +206,17 @@ body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
 .intel-category-chip.active{color:var(--green);border-color:#bcd9c8;background:var(--green-pale);font-weight:600}
 .intel-category-chip:focus-visible{outline:2px solid var(--green);outline-offset:2px}
 .intel-subcategories{border-top:1px dashed var(--line);margin-top:8px;padding-top:8px}
+.intel-controls{max-height:55vh;overflow-y:auto}
+.intel-time-filter{margin:10px 0 12px;padding:10px;background:#f7faf8;border:1px solid var(--line);border-radius:8px;min-width:0}
+.intel-time-filter[hidden],.intel-custom-dates[hidden]{display:none}
+.intel-time-heading{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:8px;font-size:12px}
+.intel-time-heading label{display:flex;align-items:center;gap:6px;font-size:11px}
+.intel-time-heading select,.intel-custom-dates input{border:1px solid var(--line);border-radius:5px;background:white;padding:6px;min-width:0;font-size:12px}
+.intel-custom-dates{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px}
+.intel-custom-dates label{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:11px;flex:1}
+.intel-custom-dates input{width:100%;box-sizing:border-box}
+.intel-time-filter>.intel-note{margin:8px 0 0}
+.intel-quote-result{margin-top:10px}
 @media(max-width:760px){.intel-category-options{flex-wrap:nowrap;overflow-x:auto;padding-bottom:6px}.intel-subcategories>.intel-note{flex:none}}
 .intel-match-summary{padding:8px 10px;background:#f2f7f2;border-radius:7px}
 #intel-match-more{width:100%;margin:6px 0 12px;white-space:normal}
