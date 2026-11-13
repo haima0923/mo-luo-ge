@@ -180,3 +180,14 @@ v0.3.4的经验推荐接口已撤销，恢复v0.3.3的回复功能。新增登�
 quote仅以有效且confirmed的报价关联所指向的回复原消息visible_date为依据，不以询价日期、导入时间或链接创建时间兜底；普通回复和待核对报价不作为已确认报价。inquiry使用询价原消息visible_date。unknown匹配原日期缺失/无效的相应报价或询价；无报价的询价不会被当成“报价日期未确认”。时间条件和q/group_id/status/category取交集，分类统计在时间筛选之后、category筛选之前计算。
 
 返回`date_filter:{period,date_basis,date_from,date_to,today,timezone,active,unknown_total}`，unknown_total是当前q/group/status/category范围内涉及原日期未确认的询价数（all时为null），同一询价同时有已知/未知日期报价时仍只计一次。启用时间过滤的item增加`date_match:{basis,dates,quote_link_ids?}`，quote_link_ids是本次范围内命中的报价关联；完整links、金额、条款和原始来源保持，客户端按quote_link_ids展示/复制范围内各报价。日期范围内的多条报价只占一条询价计数，详情可展开全部历史。精准和相似匹配等级优先，相同匹配分数按命中的最近日期降序，之后保留创建时间/id稳定排序。
+
+## 智库产品参考图片（v0.3.15）
+
+- `POST /api/intelligence/drafts/:id/commit`增加可选`product_images:[{inquiry_index,image:{name,data}}]`。inquiry_index为本次校对后的messages按顺序展开products的下标；每批至多10张、单张8MB、合计32MB，data为PNG/JPEG/WebP的base64 data URL并校验文件头。图片、消息和报价关联在同一事务保存，失败回滚元数据并清理本次新文件。无效产品归属400，已归档重复截图带图重试409并保留草稿供处理。
+- `POST /api/intelligence/inquiries/:id/product-images`接受`{images:[{name,data}]}`，为有效询价补图，201返回`{images}`；按本产品的文件hash去重，累计最多10张。失效询价409。补图不校对消息或改变报价关联。
+- `DELETE /api/intelligence/inquiries/:id/product-images/:imageId`只移除此询价的关联；不属于该产品404。没有任何历史版本继续引用时删除元数据并清理文件，否则保留历史引用。缺失文件仍可移除关联以便重新上传。
+- `GET /api/intelligence/product-images/:imageId`在登录后返回原图片二进制，inline、no-store；不返回任意文件路径，不接受SVG或外部图片URL。与原聊天截图`/images/:id`分离。
+
+搜索、match、客户自动/智能匹配和inquiryDetail的item增加`product_images:[{id,mime,name,created_at}]`，不暴露磁盘路径/hash/base64。仅当前页展开图片元数据，客户端展示缩略图并按id读取。没有图片时为空数组，不自动把同类产品图片附给当前产品。现有鉴权、同源写入、群/客户隔离及价格来源规则保持。
+
+兼容新增`intel_product_images`及`intel_product_image_links`，文件存放既有私有intelligence-uploads/，不改原表或user_version=1。消息校对只对名称、规格、别名完全相同且前后唯一的产品复制引用，不按下标继承；更名、合并、重复项或移除不自动转图。图片纳入SQLite及文件备份，旧无扩展表的备份仍兼容。

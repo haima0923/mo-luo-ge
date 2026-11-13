@@ -108,7 +108,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.14'
+        model: settings.view().model, version: '0.3.15'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;
@@ -145,6 +145,15 @@ export function createApp(config = readConfig(), options = {}) {
         const imageMatch=path.match(new RegExp(`^/api/intelligence/images/(${idPattern})$`));
         if(imageMatch&&method==='GET'){
           const image=intel.image(imageMatch[1]);res.writeHead(200,{'Content-Type':image.mime,'Cache-Control':'no-store'});return res.end(readFileSync(join(config.dataDir,image.path)));
+        }
+        const productImageMatch=path.match(new RegExp(`^/api/intelligence/product-images/(${idPattern})$`));
+        if(productImageMatch&&method==='GET'){
+          const image=intel.productImage(productImageMatch[1]);res.writeHead(200,{'Content-Type':image.mime,'Cache-Control':'no-store','Content-Disposition':'inline'});return res.end(readFileSync(join(config.dataDir,image.path)));
+        }
+        const productImagesMatch=path.match(new RegExp(`^/api/intelligence/inquiries/(${idPattern})/product-images(?:/(${idPattern}))?$`));
+        if(productImagesMatch){
+          if(!productImagesMatch[2]&&method==='POST'){const body=await readJson(req);return send(201,{images:intel.addProductImages(productImagesMatch[1],body.images)});}
+          if(productImagesMatch[2]&&method==='DELETE')return send(200,{images:intel.removeProductImage(productImagesMatch[1],productImagesMatch[2])});
         }
         if(path==='/api/intelligence/analyze'&&method==='POST'){
           if(active.size>=2)throw new HttpError(429,'已有分析正在进行，请稍后重试。');

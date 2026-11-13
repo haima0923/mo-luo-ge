@@ -21,7 +21,9 @@ try{
       await backup(intelligence,join(target,'intelligence.sqlite'));chmodSync(join(target,'intelligence.sqlite'),0o600);
       mkdirSync(join(target,'intelligence-uploads'),{recursive:true,mode:0o700});
       const snapshot=new DatabaseSync(join(target,'intelligence.sqlite'),{readOnly:true});
-      try{for(const image of snapshot.prepare('SELECT path FROM intel_images').all()){
+      try{const hasProductImages=snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='intel_product_images'").get();
+      const images=snapshot.prepare('SELECT path FROM intel_images'+(hasProductImages?' UNION SELECT path FROM intel_product_images':'')).all();
+      for(const image of images){
         if(!/^intelligence-uploads\/[a-f0-9-]{36}\.(png|jpg|webp)$/.test(image.path))throw new Error('智库截图路径无效，备份已停止。');
         copyFileSync(join(config.dataDir,image.path),join(target,image.path));
       }}finally{snapshot.close();}
