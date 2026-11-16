@@ -199,3 +199,7 @@ SSE以choice0的`finish_reason=stop`作为明确完成，不再等待`[DONE]`或
 服务端新增`QWEN_IMAGE_TIMEOUT_MS`（默认300000，上限600000、下限1000），用于含图片的客户/智库分析及本批整理/关联请求；普通文字仍受`QWEN_TIMEOUT_MS`限制，网页设置GET增加只读`image_timeout_ms`，旧私有配置仍兼容。此上限按模型调用计算，不是整批所有图片总时长；格式修复上限仍为45秒。长任务使用既有async接口，避免同步HTTP代理等待限制。
 
 `GET /api/intelligence/jobs/:id`增加`group_id`。前端在sessionStorage以`crm-intelligence-job`保存任务ID，暂时进度读取失败最多重读6次，之后保留ID供用户继续；恢复只查询job，不重新POST分析。刷新后通过智库“继续查看识别进度”恢复，保留任务原群归属。完成且草稿成功读取、明确失败或404时清除ID；401/403及暂时网络故障保留。任务仍是服务进程内存状态，重启后404提示先核对已生成草稿。客户后台任务的既有刷新恢复机制不变。
+
+## 默认连接策略（v0.3.17）
+
+共用千问请求不再因`retrySocket`而追加`Connection: close`。请求body继续`stream:true`，连接使用Node fetch默认策略；retrySocket只控制识别出的socket/不完整流最多重试一次，仍复用原AbortSignal与截止时间。不会对真实超时、HTTP错误、无效JSON或截断增加重试。客户图片、智库图片、图后汇总/关联及格式修复共用此策略；业务API与响应结构无改动。诊断工具仍可显式发送close以保留三模式对照能力，该行为不属于正常应用请求。

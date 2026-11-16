@@ -15,10 +15,10 @@ const complete=value=>event(JSON.stringify(value))+'data: '+JSON.stringify({choi
 const sse=text=>new Response(text,{headers:{'Content-Type':'text/event-stream'}});
 const message=index=>({sender:'发送者'+index,original:'这是独立的一条完整群聊消息'+index,chinese:'这是独立的一条完整群聊消息'+index,visible_date:'',visible_time:'',mentions:[],products:[],offers:[],uncertain:false});
 
-test('复现UND_ERR_SOCKET：只重连一次，使用相同请求与截止信号，图片连接关闭而不长期复用',async()=>{
+test('复现UND_ERR_SOCKET：只重连一次，使用相同请求与截止信号，并保留默认连接策略',async()=>{
   let calls=0,retries=0,body,signal;const progress=[];
   const result=await requestJson({...config,onProgress:text=>progress.push(text),onRetry:()=>retries++},[],async(url,options)=>{
-    calls++;assert.equal(options.headers.Connection,'close');
+    calls++;assert.equal(options.headers.Connection,undefined);assert.equal(options.headers.connection,undefined);assert.equal(JSON.parse(options.body).stream,true);
     if(calls===1){body=options.body;signal=options.signal;throw broken();}
     assert.equal(options.body,body);assert.equal(options.signal,signal);return output({ok:true});
   });
@@ -101,7 +101,7 @@ test('关联建议阶段断连时仅重试关联，不重新识别已完成的�
 test('真实HTTP流中途销毁socket后可恢复，第二次使用新连接并只返回完整结果',async t=>{
   let requests=0;const sockets=new Set();
   const upstream=createServer((req,res)=>{
-    requests++;sockets.add(req.socket);assert.equal(req.headers.connection,'close');req.resume();
+    requests++;sockets.add(req.socket);assert.notEqual(req.headers.connection,'close');req.resume();
     res.writeHead(200,{'Content-Type':'text/event-stream'});
     if(requests===1){res.write(event('PRIVATE-PARTIAL'));setTimeout(()=>res.destroy(),10);}
     else res.end(complete({ok:true}));
@@ -110,4 +110,21 @@ test('真实HTTP流中途销毁socket后可恢复，第二次使用新连接并�
   t.after(()=>{upstream.closeAllConnections();upstream.close();});
   const result=await requestJson(config,[],(url,options)=>fetch(`http://127.0.0.1:${upstream.address().port}`,options));
   assert.deepEqual(result,{ok:true});assert.equal(requests,2);assert.equal(sockets.size,2);
+});
+
+test('合成网关在强制close时不返回头：客户图片与智库图片/关联均使用默认流式连接完成',async t=>{
+  let mode='customer',requests=0;
+  const upstream=createServer(async(req,res)=>{
+    const chunks=[];for await(const chunk of req)chunks.push(chunk);
+    requests++;const body=JSON.parse(Buffer.concat(chunks).toString());assert.equal(body.stream,true);
+    // 复现用户对照中的响应差异；仅用于验证请求策略，不作为真实网关原因的证明。
+    if(req.headers.connection==='close')return;
+    const value=mode==='customer'?DEMO:Array.isArray(body.messages[1].content)?{messages:[{...message(0),original:'水龙头多少钱？',products:[{name:'水龙头',specs:'',keywords:''}]},message(1)],warnings:[]}:{links:[],warnings:[]};
+    res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(complete(value));
+  });
+  await new Promise(r=>upstream.listen(0,'127.0.0.1',r));t.after(()=>{upstream.closeAllConnections();upstream.close();});
+  const gateway=(_url,options)=>fetch('http://127.0.0.1:'+upstream.address().port,options);
+  const customer=await createQwen({...config,timeout:3000},gateway)({images:[image],text:'',context:{}});assert.deepEqual(customer.messages,DEMO.messages);
+  mode='intelligence';const intel=await createIntelligenceAnalyzer({...config,timeout:3000},gateway)({images:[image],group:{name:'合成群'},context:()=>[]});
+  assert.equal(intel.messages.length,2);assert.equal(requests,3);
 });
