@@ -1,4 +1,4 @@
-// 仅探测公开models端点的网络连通性；不使用/发送API Key，不创建模型任务或业务记录。
+// 无鉴权GET/POST网络探测；不使用/发送API Key，不创建模型任务或业务记录。
 import {lookup} from 'node:dns/promises';
 import {getDefaultResultOrder} from 'node:dns';
 import {getDefaultAutoSelectFamily,getDefaultAutoSelectFamilyAttemptTimeout,isIP} from 'node:net';
@@ -43,16 +43,19 @@ export async function fetchProbe(url,{timeoutMs=6000,fetcher=fetch,trace=true,po
   finally{for(const [c,handler] of subscriptions)c.unsubscribe(handler);}
 }
 
-export function addressProbe(url,address,{timeoutMs=6000,requester=request,agentFactory=()=>new Agent({keepAlive:true,maxSockets:1})}={}){
+export function addressProbe(url,address,{timeoutMs=6000,requester=request,agentFactory=()=>new Agent({keepAlive:true,maxSockets:1}),postProbe=false}={}){
   return new Promise(resolve=>{
     const started=Date.now(),agent=agentFactory(),events=[];let req,done=false,phase='tcp_connect',timer;
-    const finish=result=>{if(done)return;done=true;clearTimeout(timer);req?.destroy();agent.destroy();resolve({mode:'https-specific-address',address:address.address,family:address.family,elapsed_ms:Date.now()-started,phase,events,...result});};
+    const body=postProbe?JSON.stringify({model:'diagnostic-not-a-model',diagnostic_padding:'A'.repeat(65536)}):undefined;
+    const finish=result=>{if(done)return;done=true;clearTimeout(timer);req?.destroy();agent.destroy();resolve({mode:postProbe?'https-specific-address-post-64k':'https-specific-address',address:address.address,family:address.family,elapsed_ms:Date.now()-started,phase,events,...result});};
     // destroy后socket仍可能异步报错；监听保留到对象释放，由幂等finish忽略迟到错误。
     const fail=error=>finish({transport_reachable:false,errors:safeError(error)});
     timer=setTimeout(()=>finish({transport_reachable:false,errors:[{code:'PROBE_DEADLINE'}]}),timeoutMs);
     try{
-      req=requester({protocol:'https:',hostname:url.hostname,port:443,servername:url.hostname,path:url.pathname,method:'GET',headers:{Accept:'application/json'},agent,rejectUnauthorized:true,family:address.family,autoSelectFamily:false,
-        lookup:(_host,options,cb)=>options?.all?cb(null,[address]):cb(null,address.address,address.family)},response=>{
+      req=requester({protocol:'https:',hostname:url.hostname,port:443,servername:url.hostname,path:postProbe?'/compatible-mode/v1/chat/completions':url.pathname,method:postProbe?'POST':'GET',headers:{Accept:'application/json',...(postProbe?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}:{})},agent,rejectUnauthorized:true,family:address.family,autoSelectFamily:false,
+        // Node TLS初始化尚未完成时，同步lookup成功后立刻ENETUNREACH会使
+        // https.request同步抛错并遗留无人监听的socket；与系统DNS保持异步语义。
+        lookup:(_host,options,cb)=>queueMicrotask(()=>options?.all?cb(null,[address]):cb(null,address.address,address.family))},response=>{
         response.on?.('error',fail);phase='response_headers';response.resume();finish({transport_reachable:true,http_status:response.statusCode});
       });
       req.on('socket',socket=>{
@@ -60,7 +63,7 @@ export function addressProbe(url,address,{timeoutMs=6000,requester=request,agent
         socket.once('connect',()=>{phase='tls_handshake';events.push({stage:'tcp_connected',elapsed_ms:Date.now()-started});});
         socket.once('secureConnect',()=>{phase='waiting_headers';events.push({stage:'tls_connected',elapsed_ms:Date.now()-started});});
       });
-      req.on('error',fail);req.end();
+      req.on('error',fail);req.end(body);
     }catch(error){finish({transport_reachable:false,errors:safeError(error)});}
   });
 }
@@ -77,6 +80,10 @@ export async function runNetworkDiagnostic({url,timeoutMs=6000,resolver=lookup,f
   const post=await fetchProbe(url,{timeoutMs,fetcher,trace,postProbe:true});report.unauthenticated_post=post;onEvent(post);
   // 每地址单独请求，最多同时2项；仅作探测，不改hosts、DNS或运行中应用配置。
   for(let i=0;i<report.dns.length;i+=2){const rows=await Promise.all(report.dns.slice(i,i+2).map(a=>probeAddress(url,a,{timeoutMs})));report.addresses.push(...rows);for(const row of rows)onEvent(row);}
+  // 只对收到HTTP响应的地址做同样的无鉴权POST，避免把GET正常等同于POST正常。
+  const reachable=report.addresses.filter(row=>row.transport_reachable);
+  report.address_posts=[];
+  for(let i=0;i<reachable.length;i+=2){const rows=await Promise.all(reachable.slice(i,i+2).map(a=>probeAddress(url,a,{timeoutMs,postProbe:true})));report.address_posts.push(...rows);}
   report.note='HTTP401/403表示网络已收到服务端响应，属于本测试预期；未发送API Key，未调用模型。指定地址探测只用于区分路由和地址族问题，不是固定IP配置。';
   return report;
 }
@@ -92,6 +99,7 @@ export function diagnosticSummary(report){
   report.default_fetch.forEach((row,i)=>lines.push(`默认GET ${i+1}：${describe(row)}`));
   if(report.unauthenticated_post)lines.push(`默认POST 64KB：${describe(report.unauthenticated_post)}`);
   for(const row of report.addresses)lines.push(`IPv${row.family} ${row.address}：${describe(row)}`);
+  for(const row of report.address_posts||[])lines.push(`POST IPv${row.family} ${row.address}：${describe(row)}`);
   lines.push('401/403表示已收到网络响应；IPv6失败本身不能证明正常请求由IPv6导致超时。','此结果仅定位网络阶段，不代表图片分析或模型调用已恢复。');
   return lines.join('\n');
 }
@@ -100,9 +108,9 @@ async function main(){
   const i=process.argv.indexOf('--url'),url=diagnosticTarget(i<0?'https://dashscope.aliyuncs.com/compatible-mode/v1/models':process.argv[i+1]);
   const fileIndex=process.argv.indexOf('--report-file');
   if(fileIndex>=0&&!process.argv[fileIndex+1])throw new Error('缺少报告文件路径');
-  const deadline=setTimeout(()=>{console.log(JSON.stringify({diagnostic_finished:false,error:'OVERALL_PROBE_DEADLINE'}));process.exit(2);},65000);
+  const deadline=setTimeout(()=>{console.log(JSON.stringify({diagnostic_finished:false,error:'OVERALL_PROBE_DEADLINE'}));process.exit(2);},95000);
   try{
-    console.log('正在探测DNS、默认GET/POST与各地址，最多65秒；不改运行中服务。');
+    console.log('正在探测DNS、默认GET/POST与各地址GET/POST，最多95秒；不改运行中服务。');
     const report=await runNetworkDiagnostic({url});
     console.log(diagnosticSummary(report));
     if(fileIndex>=0){await writeFile(process.argv[fileIndex+1],JSON.stringify({report},null,2)+'\n',{mode:0o600,flag:'wx'});console.log('完整报告已保存到指定文件。');}
