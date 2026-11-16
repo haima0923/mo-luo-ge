@@ -25,7 +25,8 @@ export function readConfig(env = process.env) {
     dataDir: resolve(root, env.DATA_DIR || './data'),
     apiKey: env.DASHSCOPE_API_KEY || '', baseUrl: env.DASHSCOPE_BASE_URL || '',
     model: env.QWEN_MODEL || 'qwen3.7-plus', thinking: env.QWEN_ENABLE_THINKING === 'true',
-    timeout: Math.max(1000, Math.min(180000, Number(env.QWEN_TIMEOUT_MS) || 120000))
+    timeout: Math.max(1000, Math.min(180000, Number(env.QWEN_TIMEOUT_MS) || 120000)),
+    imageTimeout: Math.max(1000, Math.min(600000, Number(env.QWEN_IMAGE_TIMEOUT_MS) || 300000))
   };
 }
 const jsonHeaders = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' };
@@ -108,7 +109,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.15'
+        model: settings.view().model, version: '0.3.16'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;
@@ -170,7 +171,7 @@ export function createApp(config = readConfig(), options = {}) {
           };
           if(body.async===true){
             for(const [id,job] of intelligenceJobs)if(job.status!=='running'&&(Date.now()-job.started_at>1800000||intelligenceJobs.size>=100))intelligenceJobs.delete(id);
-            const id=randomUUID(),job={job_id:id,status:'running',started_at:Date.now(),progress:'正在准备群聊识别'};intelligenceJobs.set(id,job);
+            const id=randomUUID(),job={job_id:id,group_id:group.id,status:'running',started_at:Date.now(),progress:'正在准备群聊识别'};intelligenceJobs.set(id,job);
             run(progress=>{job.progress=progress;}).then(draft=>Object.assign(job,{status:'completed',draft_id:draft.id,finished_at:Date.now()}),error=>Object.assign(job,{status:'failed',error:error instanceof HttpError?error.message:'智库识别失败，请重试。',status_code:error instanceof HttpError?error.status:500,finished_at:Date.now()}));
             return send(202,{job_id:id,status:'running'});
           }

@@ -22,7 +22,7 @@ test('复现UND_ERR_SOCKET：只重连一次，使用相同请求与截止信号
     if(calls===1){body=options.body;signal=options.signal;throw broken();}
     assert.equal(options.body,body);assert.equal(options.signal,signal);return output({ok:true});
   });
-  assert.deepEqual(result,{ok:true});assert.equal(calls,2);assert.equal(retries,1);assert.match(progress[0],/自动重连/);
+  assert.deepEqual(result,{ok:true});assert.equal(calls,2);assert.equal(retries,1);assert.ok(progress.some(text=>text.includes('自动重连')));
 });
 
 test('流式接收中途断连后丢弃全部半截内容，成功重连才返回完整已校验消息',async()=>{

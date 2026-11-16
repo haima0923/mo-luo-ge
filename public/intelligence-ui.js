@@ -28,6 +28,10 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
   const view={groups:[],drafts:[],tab:'inquiries',category:'',period:'all',dateBasis:'quote',dateFrom:'',dateTo:'',offset:0,total:0,version:0},upload={files:[],busy:false,group:null},review={draft:null,message:null,linksStale:false};
   let matchVersion=0,matchScope='',lastAnalysis=null,detailVersion=0,editVersion=0;
   const draftPhotos=new WeakMap();let photoVersion=0,photoBusy=false;
+  const intelJobStorageKey='crm-intelligence-job';let intelJobId='';
+  try{const id=sessionStorage.getItem(intelJobStorageKey);if(/^[a-f0-9-]{36}$/.test(id||''))intelJobId=id;}catch{}
+  function rememberIntelJob(id){intelJobId=id;try{if(id)sessionStorage.setItem(intelJobStorageKey,id);else sessionStorage.removeItem(intelJobStorageKey);}catch{}$('intel-import').textContent=id?'继续查看识别进度':'上传群聊截图';}
+  rememberIntelJob(intelJobId);
   $('intel-product-images-dialog').addEventListener('close',()=>photoVersion++);
   $('intel-product-images-close').onclick=()=>$('intel-product-images-dialog').close();
   $('intel-product-images-dialog').addEventListener('cancel',event=>{if(photoBusy)event.preventDefault();});
@@ -235,6 +239,7 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
   }
   $('intel-import').onclick=()=>{
     if(upload.busy)return toast('已有一批截图正在识别，请在完成后继续上传。',true);
+    if(intelJobId){if(!$('intel-import-dialog').open)$('intel-import-dialog').showModal();runIntelImport();return;}
     const group=view.groups.find(g=>g.id===$('intel-group').value);if(!group)return toast('请先选择或新建一个微信群，再导入该群的截图。',true);
     upload.group=group;$('intel-import-group').textContent='归属微信群：'+group.name;$('intel-import-error').textContent='';if(!$('intel-import-dialog').open)$('intel-import-dialog').showModal();
   };
@@ -242,14 +247,38 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
   $('intel-drop').ondragover=e=>e.preventDefault();$('intel-drop').ondrop=e=>{e.preventDefault();addFiles(e.dataTransfer.files);};
   document.addEventListener('paste',e=>{if(!$('intel-import-dialog').open||$('intel-review-dialog').open)return;const files=[...(e.clipboardData?.items||[])].filter(i=>i.kind==='file').map(i=>i.getAsFile()).filter(Boolean);if(files.length){e.preventDefault();addFiles(files);}});
   const fileData=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({name:file.name,data:reader.result});reader.onerror=()=>reject(new Error('图片读取失败'));reader.readAsDataURL(file);});
-  $('intel-import-form').onsubmit=async event=>{
-    event.preventDefault();if(upload.busy)return;
-    const text=$('intel-raw-text').value.trim();if(!text&&!upload.files.length)return toast('请上传截图或填写聊天原文。',true);
+  async function waitForIntelJob(id){
+    let failures=0;
+    for(;;){
+      let job;
+      try{job=await api('/api/intelligence/jobs/'+id);failures=0;}
+      catch(error){
+        if(error.status===404){rememberIntelJob('');throw error;}
+        if(error.status===401||error.status===403)throw error;
+        if(++failures>=6)throw new Error('暂时无法读取识别进度，任务可能仍在后台运行。请点击“继续查看识别进度”，无需重复上传图片。');
+        $('intel-import-progress').textContent='连接暂时中断，正在重新读取后台识别进度…';await new Promise(resolve=>setTimeout(resolve,2000));continue;
+      }
+      const group=view.groups.find(g=>g.id===job.group_id);if(group)$('intel-import-group').textContent='归属微信群：'+group.name;
+      $('intel-import-progress').textContent=`${job.progress||'正在逐张识别群聊'} · 已用时 ${Math.floor((job.elapsed_ms||0)/1000)} 秒`;
+      if(job.status==='failed'){rememberIntelJob('');throw new Error(job.error);}
+      if(job.status==='completed'){const draft=await api('/api/intelligence/drafts/'+job.draft_id);rememberIntelJob('');return draft;}
+      await new Promise(resolve=>setTimeout(resolve,1500));
+    }
+  }
+  async function runIntelImport(){
+    if(upload.busy)return;
+    const text=$('intel-raw-text').value.trim();if(!intelJobId&&!text&&!upload.files.length)return toast('请上传截图或填写聊天原文。',true);
     upload.busy=true;$('intel-analyze').disabled=true;$('intel-analyze').textContent='逐张识别与整理中…';$('intel-import-error').textContent='';$('intel-import-progress').hidden=false;$('intel-import-progress').textContent='正在创建后台识别任务…';
     const group=upload.group;
-    try{const images=await Promise.all(upload.files.map(fileData));let draft=await post('/api/intelligence/analyze',{group_id:group.id,chat_date:$('intel-date').value,text,images,async:true});if(draft.job_id){const jobId=draft.job_id;for(;;){const job=await api('/api/intelligence/jobs/'+jobId);$('intel-import-progress').textContent=`${job.progress||'正在逐张识别群聊'} · 已用时 ${Math.floor((job.elapsed_ms||0)/1000)} 秒`;if(job.status==='failed')throw new Error(job.error);if(job.status==='completed'){draft=await api('/api/intelligence/drafts/'+job.draft_id);break;}await new Promise(resolve=>setTimeout(resolve,1500));}}const visible=$('intel-import-dialog').open;close('intel-import-dialog');upload.files=[];addFiles([]);$('intel-file-list').innerHTML='';$('intel-raw-text').value='';await groups();if(visible)openReview(draft);else toast('识别完成，可在智库的待审核导入中继续校对。');}catch(error){$('intel-import-error').textContent=error.message;toast(error.message,true);}
-    finally{upload.busy=false;$('intel-import-progress').hidden=true;$('intel-analyze').disabled=false;$('intel-analyze').textContent='识别并审核';}
-  };
+    try{
+      let draft;
+      if(intelJobId)draft=await waitForIntelJob(intelJobId);
+      else{const images=await Promise.all(upload.files.map(fileData));draft=await post('/api/intelligence/analyze',{group_id:group.id,chat_date:$('intel-date').value,text,images,async:true});if(draft.job_id){rememberIntelJob(draft.job_id);draft=await waitForIntelJob(draft.job_id);}}
+      const visible=$('intel-import-dialog').open;close('intel-import-dialog');upload.files=[];addFiles([]);$('intel-file-list').innerHTML='';$('intel-raw-text').value='';await groups();if(visible)openReview(draft);else toast('识别完成，可在智库的待审核导入中继续校对。');
+    }catch(error){$('intel-import-error').textContent=error.message;toast(error.message,true);}
+    finally{upload.busy=false;$('intel-import-progress').hidden=true;$('intel-analyze').disabled=false;$('intel-analyze').textContent=intelJobId?'继续查看识别进度':'识别并审核';}
+  }
+  $('intel-import-form').onsubmit=event=>{event.preventDefault();runIntelImport();};
   async function renderMatches(analysis,options={}){
     lastAnalysis=analysis;
     const root=$('intelligence-matches');if(!root)return;

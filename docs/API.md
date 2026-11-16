@@ -191,3 +191,11 @@ quote仅以有效且confirmed的报价关联所指向的回复原消息visible_d
 搜索、match、客户自动/智能匹配和inquiryDetail的item增加`product_images:[{id,mime,name,created_at}]`，不暴露磁盘路径/hash/base64。仅当前页展开图片元数据，客户端展示缩略图并按id读取。没有图片时为空数组，不自动把同类产品图片附给当前产品。现有鉴权、同源写入、群/客户隔离及价格来源规则保持。
 
 兼容新增`intel_product_images`及`intel_product_image_links`，文件存放既有私有intelligence-uploads/，不改原表或user_version=1。消息校对只对名称、规格、别名完全相同且前后唯一的产品复制引用，不按下标继承；更名、合并、重复项或移除不自动转图。图片纳入SQLite及文件备份，旧无扩展表的备份仍兼容。
+
+## 图片完成判定与进度恢复（v0.3.16）
+
+SSE以choice0的`finish_reason=stop`作为明确完成，不再等待`[DONE]`或EOF；无stop、length、错误事件及非法JSON仍失败。接收中progress增加阶段、已接收字符数，错误提示也保留接收计数，不含原文、思考内容或凭据。读取在完成/失败时取消，已有单次socket恢复规则保持，不对真正超时或HTTP错误追加自动重试。
+
+服务端新增`QWEN_IMAGE_TIMEOUT_MS`（默认300000，上限600000、下限1000），用于含图片的客户/智库分析及本批整理/关联请求；普通文字仍受`QWEN_TIMEOUT_MS`限制，网页设置GET增加只读`image_timeout_ms`，旧私有配置仍兼容。此上限按模型调用计算，不是整批所有图片总时长；格式修复上限仍为45秒。长任务使用既有async接口，避免同步HTTP代理等待限制。
+
+`GET /api/intelligence/jobs/:id`增加`group_id`。前端在sessionStorage以`crm-intelligence-job`保存任务ID，暂时进度读取失败最多重读6次，之后保留ID供用户继续；恢复只查询job，不重新POST分析。刷新后通过智库“继续查看识别进度”恢复，保留任务原群归属。完成且草稿成功读取、明确失败或404时清除ID；401/403及暂时网络故障保留。任务仍是服务进程内存状态，重启后404提示先核对已生成草稿。客户后台任务的既有刷新恢复机制不变。
