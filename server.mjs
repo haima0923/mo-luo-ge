@@ -14,6 +14,7 @@ import { chatDate } from './lib/intelligence.mjs';
 import { createReplyEditor,replyEditState,replyEditContextRevision,originalReplyRevision,EDITABLE_REPLY_STYLES } from './lib/reply-edit.mjs';
 import { createSuggestedReplyTranslator,replyTranslationState,replyLanguageSource,replySourceRevision } from './lib/reply-language.mjs';
 import { loginAddress, LoginLimiter } from './lib/login.mjs';
+import {prepareReplySend,replySendChoice} from './lib/reply-send.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const loopback = h => ['127.0.0.1', 'localhost', '::1'].includes(h);
@@ -109,7 +110,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.18'
+        model: settings.view().model, version: '0.3.19'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;
@@ -252,6 +253,26 @@ export function createApp(config = readConfig(), options = {}) {
         return send(201, store.createCustomer({ name: str(b.name,120,true), phone: str(b.phone||'',80), city: str(b.city||'',100), preferred_language: str(b.preferred_language||'',80) }));
       }
       let match;
+      if((match=path.match(new RegExp(`^/api/customers/(${idPattern})/replies/send$`)))&&method==='POST'){
+        const body=await readJson(req),id=match[1],shipmentId=body.shipment_id?str(body.shipment_id,36,true):null;
+        if(!['prepare','record'].includes(body.action))throw new HttpError(400,'请选择复制核对或记录操作。');
+        store.customer(id);if(shipmentId)store.shipment(shipmentId,id);
+        const draft=store.draft(str(body.draft_id,36,true)),choiceKey=replySendChoice(body);
+        if(draft.status!=='committed'||draft.customer_id!==id||draft.shipment_id!==shipmentId)throw new HttpError(409,'回复必须属于当前客户及运输需求。');
+        const existing=store.recordedReply(draft.id,choiceKey,id,shipmentId);
+        if(existing){
+          if(!existing.message_id)throw new HttpError(409,'这条已发送记录已删除，请分析新消息后再使用回复。');
+          if(body.action==='record'&&body.revision!==existing.revision)throw new HttpError(409,'回复版本不一致，请刷新。');
+          return send(200,{text:existing.text,chinese:existing.chinese,language:existing.language,revision:existing.revision,message_id:existing.message_id,recorded:true});
+        }
+        const latest=store.latest(id,shipmentId);
+        if(!latest||latest.id!==draft.id)throw new HttpError(409,'当前聊天已经更新，请使用最新回复。');
+        const prepared=prepareReplySend(referenceState(latest,id,shipmentId),body,store.context(id,'',shipmentId),store.library.revision());
+        if(body.action==='prepare')return send(200,{...prepared.snapshot,revision:prepared.revision,recorded:false});
+        if(body.revision!==prepared.revision)throw new HttpError(409,'复制期间回复或资料已变化，本次未记入聊天，请刷新核对。');
+        const recorded=store.recordReply({customerId:id,shipmentId,draftId:draft.id,choiceKey,revision:prepared.revision,snapshot:prepared.snapshot,expected:JSON.stringify(draft.analysis)});
+        return send(200,{message_id:recorded.message_id,recorded:true});
+      }
       if((match=path.match(new RegExp(`^/api/customers/(${idPattern})/replies/language$`)))&&method==='POST'){
         const body=await readJson(req),id=match[1],shipmentId=body.shipment_id?str(body.shipment_id,36,true):null;
         if(!EDITABLE_REPLY_STYLES.includes(body.style)||typeof body.language!=='string'||!Object.hasOwn(TRANSLATION_LANGUAGES,body.language)||body.action!==undefined&&!['generate','copy'].includes(body.action))throw new HttpError(400,'请选择有效的回复及语言。');
