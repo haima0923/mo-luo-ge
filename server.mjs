@@ -110,7 +110,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.19'
+        model: settings.view().model, version: '0.3.20'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;
@@ -253,6 +253,10 @@ export function createApp(config = readConfig(), options = {}) {
         return send(201, store.createCustomer({ name: str(b.name,120,true), phone: str(b.phone||'',80), city: str(b.city||'',100), preferred_language: str(b.preferred_language||'',80) }));
       }
       let match;
+      if((match=path.match(new RegExp(`^/api/customers/(${idPattern})/identity-aliases(?:/([a-f0-9]{64}))?$`)))){
+        if(method==='GET'&&!match[2])return send(200,store.identityAliases(match[1]));
+        if(method==='DELETE'&&match[2]){store.forgetIdentity(match[1],match[2]);return send(200,{ok:true});}
+      }
       if((match=path.match(new RegExp(`^/api/customers/(${idPattern})/replies/send$`)))&&method==='POST'){
         const body=await readJson(req),id=match[1],shipmentId=body.shipment_id?str(body.shipment_id,36,true):null;
         if(!['prepare','record'].includes(body.action))throw new HttpError(400,'请选择复制核对或记录操作。');
@@ -438,6 +442,13 @@ export function createApp(config = readConfig(), options = {}) {
         if (method === 'GET') return send(200, store.draft(match[1]));
         if (method === 'DELETE') { store.removeDraft(match[1]); return send(200, { ok: true }); }
       }
+      if((match=path.match(new RegExp(`^/api/drafts/(${idPattern})/identity-match$`)))&&method==='POST'){
+        const draft=store.draft(match[1]),body=await readJson(req);
+        if(draft.status!=='ready')throw new HttpError(409,'此草稿已归档。');
+        const identity={name:str(body.name||'',120),phone:str(body.phone||'',80)};
+        const result=store.matchIdentity({identity});
+        return send(200,draft.customer_id?{...result,status:'bound',customer_id:draft.customer_id,conflict:result.status==='conflict'||!!result.customer_id&&result.customer_id!==draft.customer_id}:result);
+      }
       if ((match = path.match(new RegExp(`^/api/drafts/(${idPattern})/commit$`))) && method === 'POST') {
         const b = await readJson(req), draft = store.draft(match[1]), messages = validateMessages(b.messages);
         if (messages.length !== draft.analysis.messages.length) throw new HttpError(400, '消息数量与草稿不一致，请重新分析。');
@@ -450,7 +461,10 @@ export function createApp(config = readConfig(), options = {}) {
         });
         const newCustomer = b.new_customer ? { name:str(b.new_customer.name,120,true), phone:str(b.new_customer.phone||'',80) } : null;
         const shipmentId = b.shipment_id ? str(b.shipment_id, 36, true) : null;
-        return send(200, store.commit(match[1], { customerId:b.customer_id || null, newCustomer, messages, acceptedFacts, shipmentId, newShipment:b.new_shipment || null }));
+        if(b.remember_identity!==undefined&&typeof b.remember_identity!=='boolean')throw new HttpError(400,'请选择是否记住身份线索。');
+        if(b.identity_review!==undefined&&!object(b.identity_review))throw new HttpError(400,'身份校对格式无效。');
+        const identityReview=b.identity_review?{name:str(b.identity_review.name||'',120),phone:str(b.identity_review.phone||'',80)}:b.remember_identity!==undefined?(draft.analysis.identity||{name:'',phone:''}):null;
+        return send(200, store.commit(match[1], { customerId:b.customer_id || null, newCustomer, messages, acceptedFacts, shipmentId, newShipment:b.new_shipment || null,identityReview,rememberIdentity:b.remember_identity===true }));
       }
       if ((match = path.match(new RegExp(`^/api/customers/(${idPattern})/messages/(${idPattern})$`)))) {
         if (method === 'PATCH') {

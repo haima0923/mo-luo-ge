@@ -364,6 +364,15 @@ $('small-close').onclick=()=>$('small-dialog').close();
 function customerForm(edit=false){
   const c=edit?state.detail.customer:{};
   showSmall(edit?'编辑客户':'新建客户',`<form id="customer-form"><label>客户姓名<input name="name" maxlength="120" value="${esc(c.name||'')}" required></label><label>电话 / 联系标识<input name="phone" maxlength="80" value="${esc(c.phone||'')}" placeholder="可以先留空"></label><label>所在城市<input name="city" maxlength="100" value="${esc(c.city||'')}"></label><label>沟通语言<input name="preferred_language" maxlength="80" value="${esc(c.preferred_language||'')}" placeholder="法语 / Darija / 英语"></label>${edit?`<label>跟进状态<select name="status">${['新询盘','等待资料','待报价','等待确认','已成交','跟进中'].map(v=>`<option ${v===c.status?'selected':''}>${v}</option>`).join('')}</select></label>`:''}<p>即使姓名相同，也不会自动合并为同一个客户。</p><div class="buttons"><button class="button primary">${edit?'保存':'建立档案'}</button></div></form>`);
+  if(edit){
+    $('small-body').insertAdjacentHTML('beforeend','<section class="identity-aliases"><h3>识别称呼与号码</h3><p class="identity-hint">可取消记错的关联；主档案姓名和电话仍在上方编辑。</p><button type="button" id="load-identity-aliases" class="button quiet">查看已记住的称呼</button><div id="identity-alias-list"></div></section>');
+    const load=async()=>{
+      try{const holder=$('identity-alias-list'),aliases=await api(`/api/customers/${c.id}/identity-aliases`);if(!holder||holder!==$('identity-alias-list'))return;
+        $('identity-alias-list').innerHTML=aliases.length?aliases.map(alias=>`<p><span dir="auto">${esc(alias.display)}</span> <small>${alias.source==='confirmed'?'已确认关联':alias.automatic?'历史归档关联':'历史线索（待核对）'}</small> <button type="button" class="text-button" data-forget-identity="${alias.id}">取消关联</button></p>`).join(''):'<p class="identity-hint">暂未记住其他称呼。</p>';
+        document.querySelectorAll('[data-forget-identity]').forEach(button=>button.onclick=async()=>{try{await api(`/api/customers/${c.id}/identity-aliases/${button.dataset.forgetIdentity}`,{method:'DELETE'});await load();}catch(error){toast(error.message,true);}});
+      }catch(error){toast(error.message,true);}
+    };$('load-identity-aliases').onclick=load;
+  }
   $('customer-form').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));try{const result=edit?await api(`/api/customers/${c.id}`,{method:'PATCH',body:JSON.stringify(b)}):await post('/api/customers',b);$('small-dialog').close();await refreshCustomers();await selectCustomer(result.id);}catch(e){toast(e.message,true);}};
 }
 $('new-customer').onclick=()=>customerForm();$('edit-customer').onclick=()=>customerForm(true);
@@ -457,13 +466,40 @@ function openReview(draft){
   const options=draft.demo?`<option value="new">新建演示客户</option>`:draft.customer_id?`<option value="${draft.customer_id}">${esc(state.customers.find(c=>c.id===draft.customer_id)?.name||'当前客户')}</option>`:`<option value="">请确认这是谁的聊天</option><option value="new">新建客户档案</option>${reviewCustomers.map(c=>`<option value="${c.id}">${esc(c.name)} ${esc(c.phone)}</option>`).join('')}`;
   $('review-body').innerHTML=`${a.warnings.length?`<div class="warning-box">${a.warnings.map(esc).join('<br>')}</div>`:''}<section class="review-step"><h3>01 · 确认客户</h3><p class="identity-hint">${a.identity.name||a.identity.phone?`图片身份线索：${esc(a.identity.name)} ${esc(a.identity.phone)}。仅供参考，请自行核对。`:'没有足够的客户身份线索，请确认归属。'}${draft.customer_id?' 本次分析已使用所选客户记忆，如归属错误请关闭并重新分析。':''}</p><select id="review-target" required>${options}</select><div id="new-target-fields" ${draft.demo?'':'hidden'}><label>新客户姓名<input id="review-new-name" maxlength="120" value="${esc(a.identity.name||'')}" placeholder="请输入可辨识的客户姓名"></label><label>电话 / 联系标识<input id="review-new-phone" maxlength="80" value="${esc(a.identity.phone||'')}"></label></div></section><section class="review-step"><h3>02 · 校对原文与中文</h3>${a.messages.map((m,i)=>`<div class="review-message" data-review-index="${i}"><div class="review-message-head"><b>消息 ${i+1}</b><select data-m-speaker="${i}" aria-label="消息${i+1}发送方"><option value="customer" ${m.speaker==='customer'?'selected':''}>客户</option><option value="self" ${m.speaker==='self'?'selected':''}>我</option><option value="unknown" ${m.speaker==='unknown'?'selected':''}>需确认</option></select><input data-m-time="${i}" value="${esc(m.visible_time)}" placeholder="截图可见时间" aria-label="消息${i+1}时间"><label><input type="checkbox" data-m-uncertain="${i}" ${m.uncertain?'checked':''}>识别待留意</label></div><div class="review-grid"><label><span>原文 · ${esc(m.language)}</span><textarea data-m-original="${i}" dir="auto" maxlength="6000" required>${esc(m.original)}</textarea></label><label><span>中文理解</span><textarea data-m-chinese="${i}" maxlength="6000" required>${esc(m.chinese)}</textarea></label></div></div>`).join('')}</section><section class="review-step"><h3>03 · 选择写入的客户记忆</h3><p class="identity-hint">客户明确信息默认勾选；AI 推测默认不选。可修改内容，同字段变化保留历史。不同批次货物需谨慎核对。</p>${a.facts.length?a.facts.map((f,i)=>`<label class="fact-review"><input type="checkbox" data-f-check="${i}" ${f.certainty==='stated'?'checked':''}><div><p>${esc(labels[f.field])} · ${f.certainty==='stated'?'客户明确陈述':'AI推测'} · 来源消息${f.message_index+1}</p><input type="text" data-f-value="${i}" maxlength="1500" value="${esc(f.value)}"></div></label>`).join(''):'<p class="identity-hint">本次没有提取到新增事实。</p>'}</section>`;
   if(matched)$('review-target').value=matched.id;
-  const matchNotice=matched?`已按完整手机号匹配到：${matched.name}。请核对后确认归档。`:match?.status==='ambiguous'?'同一号码对应多个客户，请人工确认归属。':match?.status==='unmatched'?'未找到该号码的已有客户，请选择或新建档案。':'';
-  if(matchNotice)$('review-target').insertAdjacentHTML('beforebegin',`<p id="review-phone-match" class="identity-hint" role="status">${esc(matchNotice)}</p>`);
+  $('review-target').insertAdjacentHTML('beforebegin',`<div class="identity-review-grid"><label>截图联系人名称 / 昵称<input id="review-identity-name" maxlength="120" dir="auto" value="${esc(a.identity.name||'')}" placeholder="保留标题原文，可校正识别错误"></label><label>截图手机号<input id="review-identity-phone" maxlength="80" value="${esc(a.identity.phone||'')}" placeholder="完整号码，保留国家代码"></label></div><button id="review-rematch" type="button" class="button quiet">按校对内容重新匹配</button><p id="review-phone-match" class="identity-hint" role="status"></p><div id="review-identity-candidates" class="identity-candidates"></div>`);
+  $('review-target').insertAdjacentHTML('afterend',`<label class="identity-remember"><input id="review-identity-remember" type="checkbox" ${!draft.demo&&match?.status!=='conflict'&&!match?.conflict?'checked':''} ${draft.demo?'disabled':''}><span>记住截图写法和校对后的称呼 / 手机号，供下次匹配；不修改客户主档案。</span></label>${a.identity_candidates?.length>1?`<p class="identity-hint">逐张截图标题：${a.identity_candidates.map((identity,index)=>esc(`${index+1}：${identity.name||''} ${identity.phone||''}`)).join('；')}</p>`:''}`);
   $('review-target').insertAdjacentHTML('afterend',`<div class="review-shipment"><label>本批消息与货物事实归属<select id="review-shipment" aria-label="审核运输需求"><option value="">未分类 / 客户一般沟通</option></select></label><label id="review-shipment-title-wrap" hidden>新运输需求名称<input id="review-shipment-title" maxlength="120" placeholder="例如：家具 · 义乌到卡萨布兰卡"></label><p class="identity-hint">联系方式和语言保存在客户层级；货量、货物和运输范围按本次所选需求保存。若一张截图包含多票货物，请分别分析和审核。更改分析时的需求归属后，旧回复停用，需重新分析。</p></div>`);
   $('review-shipment').onchange=()=>{const isNew=$('review-shipment').value==='new';$('review-shipment-title-wrap').hidden=!isNew;$('review-shipment-title').required=isNew;};
+  let newNameEdited=false,newPhoneEdited=false;
+  $('review-new-name').oninput=()=>{newNameEdited=true;};$('review-new-phone').oninput=()=>{newPhoneEdited=true;};
+  $('review-identity-name').oninput=()=>{if(!newNameEdited)$('review-new-name').value=$('review-identity-name').value;};
+  $('review-identity-phone').oninput=()=>{if(!newPhoneEdited)$('review-new-phone').value=$('review-identity-phone').value;};
   $('review-target').onchange=()=>{$('new-target-fields').hidden=$('review-target').value!=='new';$('review-new-name').required=$('review-target').value==='new';loadReviewShipments(draft);};
   $('review-target').onchange();
+  renderReviewIdentityMatch(draft,match);
+  $('review-rematch').onclick=async()=>{
+    const button=$('review-rematch');button.disabled=true;
+    try{
+      const identity={name:$('review-identity-name').value,phone:$('review-identity-phone').value};
+      const result=await post(`/api/drafts/${draft.id}/identity-match`,identity);
+      if(state.draft!==draft||$('review-identity-name').value!==identity.name||$('review-identity-phone').value!==identity.phone)return;renderReviewIdentityMatch(draft,result,true);
+    }catch(error){toast(error.message,true);}finally{if(button.isConnected)button.disabled=false;}
+  };
   if(!$('review-dialog').open)$('review-dialog').showModal();
+}
+function renderReviewIdentityMatch(draft,match,select=false){
+  const conflict=match?.status==='conflict'||match?.conflict;
+  const label=match?.method==='phone'?'完整手机号':match?.method==='phone_name'?'手机号和联系人名称':'联系人名称或已确认称呼';
+  $('review-phone-match').textContent=conflict?'名称、手机号或不同截图指向不同客户，请先核对，避免归错档案。':match?.status==='matched'?`已按${label}匹配到：${match.customer.name}。请核对后确认归档。`:match?.status==='suggested'?'找到相似名称、号码或历史记录线索，请点选候选客户并核对。':match?.status==='ambiguous'?'同一名称或号码对应多个客户，请人工确认归属。':match?.status==='unmatched'?'未找到相同名称或号码；可校对后重试，或选择已有客户并记住称呼。':match?.status==='bound'?'保持本次分析使用的客户归属。':'未识别到清晰的标题信息，可在上方校正后重新匹配。';
+  const candidates=match?.status==='matched'||match?.status==='bound'&&!match?.conflict?[]:match?.candidates||[];
+  $('review-identity-candidates').innerHTML=candidates.map(customer=>`<button type="button" class="button quiet" data-identity-candidate="${esc(customer.id)}" ${draft.customer_id?'disabled':''}>${esc(customer.name)} ${esc(customer.phone||'')} · 选择</button>`).join('');
+  const ensureOption=customer=>{if(![...$('review-target').options].some(option=>option.value===customer.id))$('review-target').add(new Option(`${customer.name} ${customer.phone||''}`,customer.id));};
+  document.querySelectorAll('[data-identity-candidate]').forEach(button=>button.onclick=()=>{
+    if(draft.customer_id){toast('本次分析已使用所选客户记忆，更换客户需重新分析。',true);return;}
+    const customer=candidates.find(c=>c.id===button.dataset.identityCandidate);ensureOption(customer);$('review-target').value=customer.id;$('review-target').onchange();
+  });
+  if(select&&!draft.customer_id&&!draft.demo){if(match.status==='matched'){ensureOption(match.customer);$('review-target').value=match.customer.id;}else $('review-target').value='';$('review-target').onchange();}
+  if(conflict)$('review-identity-remember').checked=false;
 }
 async function loadReviewShipments(draft){
   const target=$('review-target').value;
@@ -488,11 +524,13 @@ $('review-form').onsubmit=async e=>{
   if(messages.some(m=>m.speaker==='unknown'))return toast('请确认所有消息的发送方',true);
   const accepted_facts=d.analysis.facts.flatMap((f,i)=>document.querySelector(`[data-f-check="${i}"]`).checked?[{index:i,value:document.querySelector(`[data-f-value="${i}"]`).value}]:[]);
   const b={messages,accepted_facts,customer_id:target==='new'?null:target,new_customer:target==='new'?{name:$('review-new-name').value,phone:$('review-new-phone').value}:null};
+  b.identity_review={name:$('review-identity-name').value,phone:$('review-identity-phone').value};
+  b.remember_identity=$('review-identity-remember').checked;
   const shipment=$('review-shipment').value;
   b.shipment_id=shipment && shipment!=='new'?shipment:null;
   b.new_shipment=shipment==='new'?{title:$('review-shipment-title').value}:null;
   $('commit-btn').disabled=true;
-  try{const result=await post(`/api/drafts/${d.id}/commit`,b);$('review-dialog').close();state.draft=null;state.files.forEach(x=>URL.revokeObjectURL(x.url));state.files=[];renderFiles();$('message-input').value='';await refreshCustomers();await selectCustomer(result.customer_id,result.shipment_id||null);await refreshDrafts();toast(`已归档 ${result.inserted} 条新消息${result.skipped?`，跳过 ${result.skipped} 条重叠消息`:''}`);}
+  try{const result=await post(`/api/drafts/${d.id}/commit`,b);$('review-dialog').close();state.draft=null;state.files.forEach(x=>URL.revokeObjectURL(x.url));state.files=[];renderFiles();$('message-input').value='';await refreshCustomers();await selectCustomer(result.customer_id,result.shipment_id||null);await refreshDrafts();toast(`已归档 ${result.inserted} 条新消息${result.skipped?`，跳过 ${result.skipped} 条重叠消息`:''}${result.identity_warnings?.length?'；'+result.identity_warnings.join('；'):''}`,!!result.identity_warnings?.length);}
   catch(e){toast(e.message,true);}finally{$('commit-btn').disabled=false;}
 };
 async function refreshDrafts(){const drafts=await api('/api/drafts');$('draft-count').textContent=drafts.length;if(state.draft&&!drafts.some(d=>d.id===state.draft.id)){state.draft=null;if($('memory-dialog').open&&memoryView.detail)renderProfile();}return drafts;}
