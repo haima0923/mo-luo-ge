@@ -110,7 +110,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.20'
+        model: settings.view().model, version: '0.3.21'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;
@@ -157,6 +157,7 @@ export function createApp(config = readConfig(), options = {}) {
           if(!productImagesMatch[2]&&method==='POST'){const body=await readJson(req);return send(201,{images:intel.addProductImages(productImagesMatch[1],body.images)});}
           if(productImagesMatch[2]&&method==='DELETE')return send(200,{images:intel.removeProductImage(productImagesMatch[1],productImagesMatch[2])});
         }
+        if(path==='/api/intelligence/manual-records'&&method==='POST')return send(201,intel.manualRecord(await readJson(req)));
         if(path==='/api/intelligence/analyze'&&method==='POST'){
           if(active.size>=2)throw new HttpError(429,'已有分析正在进行，请稍后重试。');
           const body=await readJson(req),group=intel.group(str(body.group_id,36,true)),images=decodeImages(body.images||[]),text=str(body.text||'',16000),chat_date=chatDate(body.chat_date||'');
@@ -479,7 +480,7 @@ export function createApp(config = readConfig(), options = {}) {
         res.writeHead(200, { 'Content-Type':image.mime,'Cache-Control':'no-store','Content-Disposition':'inline' });
         return res.end(readFileSync(join(config.dataDir,image.path)));
       }
-      const staticFiles = { '/':'index.html', '/app.js':'app.js', '/intelligence-ui.js':'intelligence-ui.js', '/styles.css':'styles.css', '/layout.css':'layout.css' };
+      const staticFiles = { '/':'index.html', '/app.js':'app.js', '/intelligence-ui.js':'intelligence-ui.js', '/intelligence-manual.js':'intelligence-manual.js', '/styles.css':'styles.css', '/layout.css':'layout.css' };
       if (method === 'GET' && staticFiles[path]) {
         const file = staticFiles[path];
         res.writeHead(200,{ 'Content-Type':file.endsWith('.html')?'text/html; charset=utf-8':file.endsWith('.js')?'text/javascript; charset=utf-8':'text/css; charset=utf-8','Cache-Control':'no-cache' });
