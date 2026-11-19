@@ -42,7 +42,7 @@ try{
   await page.waitForFunction(()=>document.querySelector('#intel-count').textContent.includes('共 12'));
   assert.equal(await page.locator('#intel-list .intel-card-title strong').first().textContent(),'花洒');
   assert.match(await page.locator('#intel-search-summary').textContent(),/卫浴五金/);
-  const total=async n=>page.waitForFunction(n=>document.querySelector('#intel-count').textContent.startsWith(`共 ${n} 项`),n);
+  const total=async n=>page.waitForFunction(n=>document.querySelector('#intel-count').textContent.startsWith(`共 ${n} 项`)&&!document.querySelector('#intel-list>.memory-meta'),n);
   const category=async(id,n)=>{await page.locator(`[data-intel-category="${id}"]`).click();await total(n);};
   await page.locator('#intel-search').fill('');await page.locator('#intel-search-btn').click();await total(15);
   await category('hardware',12);await category('plumbing',4);
@@ -85,5 +85,35 @@ try{
   await page.locator('#intel-group').selectOption(group.id);await total(4);await category('',43);
   await page.locator('#intel-search').fill('');await page.locator('#intel-search-btn').click();await total(46);
   if(shots)await page.screenshot({path:join(shots,'category-browser-desktop.png')});
+  // 大类短词须完整覆盖女鞋/男鞋及不含“鞋”字的别名，分页和推荐继续加载不能漏掉后半部分。
+  const shoeNames=['女鞋','男鞋','拖鞋','洞洞鞋','棉拖','女士短靴','sandals',...Array.from({length:35},(_,i)=>'休闲鞋样品'+i)];
+  const shoeMessages=shoeNames.map(name=>m('合成鞋类来源',name,{products:[{name,specs:'合成规格',keywords:''}]}));
+  const shoeDraft=store.intelligence.saveDraft({group_id:group.id,analysis:{messages:shoeMessages,links:[],sources:shoeMessages.map(()=>[]),warnings:[]}});
+  store.intelligence.commit(shoeDraft.id,{messages:shoeMessages,links:[]});
+  await page.locator('#intel-search').fill('鞋');await page.locator('#intel-search-btn').click();await total(shoeNames.length);
+  assert.match(await page.locator('[data-intel-category="shoes"]').textContent(),/42/);
+  const seen=new Set(await page.locator('#intel-list .intel-card-title strong').allTextContents());
+  await page.locator('#intel-next').click();await page.waitForFunction(()=>document.querySelector('#intel-count').textContent.includes('31—42'));
+  for(const name of await page.locator('#intel-list .intel-card-title strong').allTextContents())seen.add(name);
+  assert.deepEqual(seen,new Set(shoeNames));
+  await category('shoes',42);assert.match(await page.locator('#intel-count').textContent(),/1—30/);
+  await page.locator('#intel-search').fill('女鞋');await page.locator('#intel-search-btn').click();await total(42);
+  assert.equal(await page.locator('#intel-list .intel-card-title strong').first().textContent(),'女鞋');
+  await page.locator('#intel-close').click();
+  for(const width of [1440,390]){
+    await page.setViewportSize({width,height:960});
+    if(width<900)await page.locator('.mobile-nav [data-panel=replies]').click();
+    await query('鞋');
+    while(await page.locator('#intel-match-more').count()){
+      const previous=await page.locator('#intel-match-results .intel-card').count();await page.locator('#intel-match-more').click();
+      await page.waitForFunction(n=>document.querySelectorAll('#intel-match-results .intel-card').length>n,previous);
+    }
+    assert.deepEqual(new Set(await page.locator('#intel-match-results .intel-card-title strong').allTextContents()),new Set(shoeNames));
+    await page.locator('#intelligence-btn').click();await page.locator('#intel-search').fill('鞋');await page.locator('#intel-search-btn').click();await total(42);
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    if(shots)await page.screenshot({path:join(shots,'shoes-category-'+width+'.png')});
+    await page.locator('#intel-close').click();
+  }
+  assert.equal(modelCalls,1,'大类搜索与继续查看不增加模型调用');
   assert.deepEqual(errors,[]);console.log('分类快捷入口、细分类、未分类、数量、群/状态联动、切换页签与分类重置分页、类目搜索、精准优先、自动匹配、查看更多、桌面及768/390/320px布局通过；无真实模型调用。');
 }finally{await browser.close();await new Promise(r=>server.close(r));store.close();rmSync(dir,{recursive:true,force:true});}

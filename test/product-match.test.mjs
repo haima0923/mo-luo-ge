@@ -4,7 +4,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {IntelligenceLibrary} from '../lib/intelligence.mjs';
-import {productProfile} from '../lib/product-match.mjs';
+import {productProfile,productQuery,rankProduct} from '../lib/product-match.mjs';
 import {createApp,readConfig} from '../server.mjs';
 import {DEMO} from '../lib/demo.mjs';
 
@@ -54,6 +54,52 @@ test('类目、中英法别名、前缀及小拼写错误都匹配，不能把ta
   add(store,group,'facuet');assert.ok(store.search('水龙头').items.some(r=>r.product==='facuet'&&r.match.kind==='fuzzy'));
   add(store,group,'型号XY',{keywords:'五金, 紧固件'});assert.ok(store.search('五金').items.some(r=>r.product==='型号XY'));
   assert.equal(store.search("%' OR 1=1 --").total,0);
+});
+
+test('鞋等大类短词覆盖未枚举品名与无鞋字别名，具体产品精准优先，配件及包装设备不混入',t=>{
+  const {store,group}=fixture(t);
+  const names=['女鞋','男鞋','童鞋','拖鞋','洞洞鞋','运动鞋','皮鞋','高跟鞋','雨鞋','棉拖','家居拖','人字拖','雪地靴','女士短靴','women’s shoes','pantoufles','sandals','clogs','boots'];
+  for(const name of names)add(store,group,name);
+  for(const name of ['鞋柜','鞋架','鞋盒','鞋垫','鞋带','鞋套','鞋材','棉拖鞋盒','制鞋机','洗鞋机','shoe rack','shoe boxes','boot covers','耳机','包装机','面包','灯芯绒'])add(store,group,name);
+  for(const term of ['鞋','鞋子','鞋类','鞋靴','footwear','shoes','chaussures']){
+    const result=store.search(term,{group_id:group.id,limit:100});
+    assert.deepEqual(new Set(result.items.map(r=>r.product)),new Set(names),term);
+    assert.equal(result.query_categories[0].id,'shoes');
+    assert.equal(result.category_facets.items.find(c=>c.id==='shoes').count,names.length);
+    assert.ok(result.items.every(r=>r.categories.some(c=>c.id==='shoes')));
+  }
+  for(const term of ['女鞋','洞洞鞋','拖鞋','皮鞋','棉拖']){
+    const result=store.search(term,{group_id:group.id,category:'shoes',limit:100});
+    assert.equal(result.items[0].product,term);assert.equal(result.items[0].match.kind,'exact');
+    assert.equal(result.total,names.length);
+  }
+  assert.equal(store.search('',{category:'shoes',group_id:group.id,limit:100}).total,names.length);
+  assert.equal(store.search('洞洞鞋',{category:'shoes',group_id:group.id}).items.find(r=>r.product==='拖鞋').match.kind,'category','具体不同鞋款不能被当成同义产品');
+  for(const [term,products,excluded] of [['包',['女包','男包','旅行包','钱包'],['包装机','打包机','面包','电池包']],['灯',['台灯','吊灯','壁灯'],['灯芯绒']]]){
+    const query=productQuery(term);
+    for(const product of products)assert.equal(rankProduct(query,{product})?.kind,'category',term+'→'+product);
+    for(const product of excluded)assert.equal(rankProduct(query,{product}),null,term+'→'+product);
+  }
+});
+
+test('鞋类匹配在分页、群、日期、报价状态下保持完整，校对品名后立即更新分类',t=>{
+  const {store,group}=fixture(t);add(store,group,'女鞋');
+  const names=Array.from({length:105},(_,i)=>i%2?'女士休闲鞋'+i:'棉拖'+i);
+  const messages=names.map(name=>message(name,{visible_date:'2026-11-13',products:[{name,specs:'',keywords:''}]}));
+  const draft=store.saveDraft({group_id:group.id,analysis:{messages,links:[],sources:messages.map(()=>[]),warnings:[]}});store.commit(draft.id,{messages,links:[]});
+  const other=store.createGroup({name:'合成鞋类另一群'});add(store,other,'男鞋');
+  const options={group_id:group.id,limit:30},first=store.search('鞋',options),all=[];
+  for(let offset=0;offset<first.total;offset+=30)all.push(...store.search('鞋',{...options,offset}).items);
+  assert.equal(first.total,106);assert.equal(new Set(all.map(r=>r.id)).size,106);
+  assert.deepEqual(new Set(all.map(r=>r.product)),new Set(['女鞋',...names]));
+  assert.equal(store.search('女鞋',options).items[0].product,'女鞋','较早的精准品名仍在前面');
+  assert.equal(store.search('鞋',{...options,status:'quoted'}).total,1);
+  assert.equal(store.search('鞋',{...options,status:'unquoted'}).total,105);
+  assert.equal(store.search('鞋',{...options,period:'custom',date_basis:'inquiry',date_from:'2026-11-13',date_to:'2026-11-13'}).total,105);
+  assert.equal(store.search('鞋',{...options,period:'unknown',date_basis:'inquiry'}).total,1);
+  const ask=all.find(r=>r.product==='女鞋').message;
+  store.reviseMessage(ask.id,{...ask,products:[{name:'鞋柜',specs:'更正为家具',keywords:''}]});
+  assert.equal(store.search('鞋',options).total,105);
 });
 
 test('类目匹配保留完整分页、群及报价状态过滤，修改产品后立即更新归类且旧记录失效',t=>{
@@ -130,4 +176,11 @@ test('手动、聊天自动和智能提取使用相同归类排序；翻页不�
   const smart=await call('/api/customers/'+a.id+'/intelligence',{shipment_id:s.id});assert.equal(smart.items[0].product,'不锈钢花洒套装');assert.ok(smart.items.some(x=>x.product==='水龙头'));
   assert.equal(calls,1);assert.ok(captured.includes('pommeau de douche'));assert.ok(!captured.includes('另一个客户私有')&&!captured.includes('另一票私有'));
   assert.equal((await call('/api/customers/'+a.id+'/intelligence')).total,0);
+  for(const name of ['女鞋','男鞋','拖鞋','洞洞鞋','棉拖','雪地靴','sandals','clogs','皮鞋'])add(lib,g,name);
+  put(a.id,s.id,'这次要询价鞋，包含女鞋、拖鞋和棉拖',['鞋']);
+  const shoesManual=await call('/api/intelligence/match',{query:'鞋'}),shoesAutomatic=await call('/api/customers/'+a.id+'/intelligence?shipment_id='+s.id);
+  assert.equal(shoesManual.total,9);assert.equal(shoesAutomatic.total,9);
+  assert.deepEqual(shoesAutomatic.items.map(r=>r.id),shoesManual.items.map(r=>r.id));
+  const shoesLast=await call('/api/intelligence/match',{query:shoesManual.query,offset:8,limit:8});
+  assert.equal(new Set([...shoesManual.items,...shoesLast.items].map(r=>r.id)).size,9);assert.equal(calls,1);
 });
