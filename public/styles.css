@@ -179,7 +179,7 @@ body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
 .intel-status{font-size:10px;border-radius:5px;padding:5px 7px}
 .intel-status.unquoted{background:#fff0d8;color:#8b5a19}
 .intel-status.quoted{background:var(--green-pale);color:var(--green)}
-.intel-excerpt{color:#65766a;max-height:100px;overflow:auto}
+.intel-excerpt{color:#65766a}
 .intel-offer{padding:11px;background:#eaf3ed;border-radius:7px;margin:10px 0}
 .intel-offer strong{font-size:12px;color:var(--green);white-space:pre-wrap}
 .intel-offer p{font-size:11px;line-height:1.85;white-space:pre-wrap;margin-top:5px}

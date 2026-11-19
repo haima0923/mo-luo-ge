@@ -206,7 +206,7 @@ def app_status():
         connection.request('GET', '/api/status', headers={'Host': DOMAIN})
         response = connection.getresponse()
         body = json.loads(response.read())
-        if response.status != 200 or body.get('version') not in ('0.2.0', '0.2.1', '0.2.2', '0.2.3', '0.2.4', '0.2.5', '0.2.6', '0.3.0', '0.3.1', '0.3.2', '0.3.3', '0.3.4', '0.3.5', '0.3.6', '0.3.7', '0.3.8', '0.3.9', '0.3.10', '0.3.11', '0.3.12', '0.3.13', '0.3.14', '0.3.15', '0.3.16', '0.3.17', '0.3.18', '0.3.19', '0.3.20', '0.3.21', '0.3.22') or not body.get('password_required'):
+        if response.status != 200 or body.get('version') not in ('0.2.0', '0.2.1', '0.2.2', '0.2.3', '0.2.4', '0.2.5', '0.2.6', '0.3.0', '0.3.1', '0.3.2', '0.3.3', '0.3.4', '0.3.5', '0.3.6', '0.3.7', '0.3.8', '0.3.9', '0.3.10', '0.3.11', '0.3.12', '0.3.13', '0.3.14', '0.3.15', '0.3.16', '0.3.17', '0.3.18', '0.3.19', '0.3.20', '0.3.21', '0.3.22', '0.3.23') or not body.get('password_required'):
             raise RuntimeError('应用版本或密码保护检查失败。')
         return body
     finally:
@@ -417,8 +417,8 @@ def upgrade():
     previous_release = current.resolve()
     previous_unit = SERVICE_UNIT.read_text()
     status = app_status()
-    if status['version'] == '0.3.22':
-        print('v0.3.22 智库筛选折叠与结果扩展已安装：https://' + DOMAIN)
+    if status['version'] == '0.3.23':
+        print('v0.3.23 智库长记录完整展示已安装：https://' + DOMAIN)
         return
     if not (APPLICATION / 'lib/references.mjs').is_file():
         raise RuntimeError('升级包缺少公共资料库源码。')
@@ -426,7 +426,7 @@ def upgrade():
     node = Path(state['node'])
     run([node, '--test', *sorted((APPLICATION / 'test').glob('*.test.mjs'))], cwd=APPLICATION)
     backup()
-    release = Path(tempfile.mkdtemp(prefix='v0.3.22-', dir=BASE / 'releases'))
+    release = Path(tempfile.mkdtemp(prefix='v0.3.23-', dir=BASE / 'releases'))
     def omit(directory, names):
         excluded = {'.git', '.env', 'data', 'backups', 'node_modules', 'test-results', '__pycache__'}
         if Path(directory).resolve() == PACKAGE:
@@ -448,7 +448,7 @@ def upgrade():
         atomic(SERVICE_UNIT, render_service(node))
         run(['systemctl', 'daemon-reload'])
         run(['systemctl', 'restart', 'morocco-ai-crm'])
-        if wait_for_app()['version'] != '0.3.22':
+        if wait_for_app()['version'] != '0.3.23':
             raise RuntimeError('新版本检查失败。')
         check_navigation()
         if website_status() != before:
@@ -460,7 +460,7 @@ def upgrade():
         run(['systemctl', 'restart', 'morocco-ai-crm'])
         raise
     atomic(BASE / 'manage.py', Path(__file__).read_text())
-    print('已更新至v0.3.22：智库顶部筛选可收起/展开，收起后显示当前条件并扩大结果区域；保留搜索、分类、时间、分页及原有功能、全部数据和私有配置。')
+    print('已更新至v0.3.23：智库询价长文字完整展开，随结果列表滚动查看；保留筛选折叠、搜索、分类、时间、图片及全部数据和私有配置。')
     print('打开 https://' + DOMAIN + ' 查看新功能。')
 
 def resume():
@@ -525,7 +525,7 @@ def install():
     runtime = BASE / 'runtime' / staged_node.parent.parent.name
     shutil.copytree(staged_node.parent.parent, runtime)
     node = runtime / 'bin/node'
-    source = BASE / 'releases/v0.3.22'
+    source = BASE / 'releases/v0.3.23'
     def omit(directory, names):
         excluded = {'.git', '.env', 'data', 'backups', 'node_modules', 'test-results', '__pycache__'}
         if Path(directory).resolve() == PACKAGE:
