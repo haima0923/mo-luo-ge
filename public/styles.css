@@ -145,6 +145,23 @@ body{display:flex;flex-direction:column;height:100dvh;overflow:hidden}
 .intelligence-dialog[open]{display:flex;flex-direction:column}
 .intelligence-dialog .dialog-head,.intel-controls,.intel-pager{flex-shrink:0}
 .intel-controls{padding:16px 24px;border-bottom:1px solid var(--line)}
+.intelligence-dialog .dialog-head>div:first-child{min-width:0}
+.intel-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.intel-header-actions .button{font-size:12px;padding:8px 11px}
+.intel-filter-summary{display:flex;align-items:center;gap:10px;flex-shrink:0;min-width:0;padding:10px 24px;border-bottom:1px solid var(--line);background:#f7faf8;font-size:12px;color:var(--muted)}
+.intel-filter-summary>span{flex-shrink:0;color:var(--green);font-weight:600}
+.intel-filter-summary p{min-width:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow-wrap:anywhere;line-height:1.6;max-height:3.2em}
+.intel-filters-collapsed .dialog-head{padding:12px 24px}
+.intel-filters-collapsed .dialog-head .eyebrow{display:none}
+.intel-filters-collapsed .dialog-head h2{margin-top:0}
+@media(max-width:600px){
+  .intelligence-dialog .dialog-head{padding:12px;gap:6px}
+  .intelligence-dialog .dialog-head h2{font-size:16px}
+  .intelligence-dialog .dialog-head .eyebrow{display:none}
+  .intel-header-actions{gap:4px}
+  .intel-header-actions .button{font-size:11px;padding:8px}
+  .intel-filter-summary{padding:8px 12px;gap:8px;font-size:11px}
+}
 .intel-toolbar,.intel-tabs,.intel-actions,.intel-message-head,.intel-card-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .intel-toolbar{margin-bottom:10px}
 .intel-toolbar select,.intel-toolbar input,.intel-match-form input{min-width:0;flex:1;border:1px solid var(--line);border-radius:7px;padding:9px;background:#fff;font-size:12px}

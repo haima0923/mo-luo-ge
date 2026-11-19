@@ -110,7 +110,7 @@ export function createApp(config = readConfig(), options = {}) {
       if (method === 'GET' && path === '/api/status') return send(200, {
         authenticated: auth(req), password_required: !!config.password,
         qwen_configured: settings.view().configured,
-        model: settings.view().model, version: '0.3.21'
+        model: settings.view().model, version: '0.3.22'
       });
       if (method === 'POST' && path === '/api/login') {
         const body = await readJson(req), password = body.password;

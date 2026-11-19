@@ -13,12 +13,13 @@ function matchSummary(result){
 }
 export function initIntelligence({api,post,toast,showSmall,copy,getState}){
   document.body.insertAdjacentHTML('beforeend',`
-    <dialog id="intelligence-dialog" class="intelligence-dialog" aria-labelledby="intel-title"><div class="dialog-head"><div><span class="eyebrow">GROUP INQUIRY KNOWLEDGE</span><h2 id="intel-title">数据库智库</h2></div><button type="button" id="intel-close" class="icon-button" aria-label="关闭数据库智库">×</button></div>
-      <div class="intel-controls"><div class="intel-toolbar"><select id="intel-group" aria-label="微信群筛选"><option value="">全部微信群</option></select><button type="button" id="intel-new-group" class="button quiet">＋ 新建群</button><button type="button" id="intel-import" class="button primary">上传群聊截图</button><button type="button" id="intel-manual-open" class="button quiet">录入文字记录</button></div>
+    <dialog id="intelligence-dialog" class="intelligence-dialog" aria-labelledby="intel-title"><div class="dialog-head"><div><span class="eyebrow">GROUP INQUIRY KNOWLEDGE</span><h2 id="intel-title">数据库智库</h2></div><div class="intel-header-actions"><button type="button" id="intel-toggle-filters" class="button quiet" aria-expanded="true" aria-controls="intel-controls">收起筛选 ↑</button><button type="button" id="intel-close" class="icon-button" aria-label="关闭数据库智库">×</button></div></div>
+      <div id="intel-controls" class="intel-controls"><div class="intel-toolbar"><select id="intel-group" aria-label="微信群筛选"><option value="">全部微信群</option></select><button type="button" id="intel-new-group" class="button quiet">＋ 新建群</button><button type="button" id="intel-import" class="button primary">上传群聊截图</button><button type="button" id="intel-manual-open" class="button quiet">录入文字记录</button></div>
       <p class="intel-note">同一群分批导入，可累计每天的聊天。未报价表示当前已导入并确认的记录中尚未找到报价；身份、@与回复归属需核对。</p>
       <div class="intel-toolbar"><input id="intel-search" aria-label="搜索智库" placeholder="产品、类目、规格或别名，如花洒、五金"><select id="intel-status" aria-label="报价状态"><option value="">全部询价</option><option value="unquoted">尚未找到报价</option><option value="quoted">已有报价</option><option value="needs_review">关联待核对</option></select><button id="intel-search-btn" type="button" class="button quiet">搜索</button></div><div id="intel-search-summary"></div>
       <section id="intel-time-filter" class="intel-time-filter" aria-label="询价报价时间筛选"><div class="intel-time-heading"><strong>按时间查看</strong><label>日期依据 <select id="intel-date-basis" aria-label="时间筛选日期依据"><option value="quote">报价日期</option><option value="inquiry">询价日期</option></select></label></div><div class="intel-category-options" aria-label="时间范围"><button type="button" class="intel-category-chip active" data-intel-period="all" aria-pressed="true">不限时间</button><button type="button" class="intel-category-chip" data-intel-period="7d" aria-pressed="false">最近一周</button><button type="button" class="intel-category-chip" data-intel-period="15d" aria-pressed="false">最近15天</button><button type="button" class="intel-category-chip" data-intel-period="30d" aria-pressed="false">最近一个月</button><button type="button" class="intel-category-chip" data-intel-period="custom" aria-pressed="false">自定义时间</button><button type="button" class="intel-category-chip" data-intel-period="unknown" aria-pressed="false">日期未确认</button></div><div id="intel-custom-dates" class="intel-custom-dates" hidden><label>开始日期<input id="intel-date-from" type="date" required></label><label>结束日期<input id="intel-date-to" type="date" required></label><button id="intel-date-apply" type="button" class="button quiet">应用时间</button></div><p id="intel-time-summary" class="intel-note" aria-live="polite">按原消息中的日期筛选，最近一个月按30天计算。</p></section>
       <div class="intel-tabs"><button type="button" data-intel-tab="inquiries" class="active">产品询价</button><button type="button" data-intel-tab="messages">全部聊天</button><button type="button" data-intel-tab="drafts">待审核导入</button></div><div id="intel-categories" class="intel-categories" aria-label="产品分类筛选"></div></div>
+      <div id="intel-filter-summary" class="intel-filter-summary" hidden><span>当前筛选</span><p id="intel-applied-filters">正在读取智库…</p></div>
       <div id="intel-list" class="intel-list"></div><div class="intel-pager"><button id="intel-prev" class="button quiet">上一页</button><span id="intel-count"></span><button id="intel-next" class="button quiet">下一页</button></div>
     </dialog>
     <dialog id="intel-import-dialog" class="intel-import-dialog" aria-labelledby="intel-import-title"><form id="intel-import-form"><div class="dialog-head"><h2 id="intel-import-title">导入同一微信群的聊天</h2><button type="button" id="intel-import-close" class="icon-button" aria-label="关闭群聊上传">×</button></div><div class="dialog-body"><p id="intel-import-group"></p><label>截图聊天日期（可留空，不确定时不要猜）<input type="date" id="intel-date"></label><p class="intel-note">截图明确显示的完整日期优先；只有时间时使用你填写的日期。多个微信群请分批上传。</p><div id="intel-drop" class="intel-drop"><label class="button quiet">＋ 选择截图<input id="intel-files" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden></label><span>最多10张 · 单张8MB · 总计32MB；支持拖入、粘贴</span><div id="intel-file-list" class="image-list"></div></div><label>也可以粘贴群聊原文<textarea id="intel-raw-text" rows="4" maxlength="16000" placeholder="请保留发送者昵称、时间和@对象"></textarea></label><p class="intel-note">分析失败会保留截图供手动重试；已提交的分析不会自动重复发送。</p><p id="intel-import-progress" role="status" class="intel-note" hidden></p><p id="intel-import-error" role="status" class="error-text"></p></div><div class="dialog-foot"><span>可关闭窗口后台识别，完成后从待审核导入继续；不会发送消息。</span><button id="intel-analyze" class="button primary">识别并审核</button></div></form></dialog>
@@ -27,6 +28,29 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
     <dialog id="intel-image-dialog" class="intel-detail-dialog" aria-label="查看图片"><div class="dialog-head"><h2 id="intel-image-title">原始群聊截图</h2><button type="button" id="intel-image-close" class="icon-button" aria-label="关闭图片">×</button></div><div class="dialog-body"><img id="intel-source-image" alt="原始群聊截图"></div></dialog>
     <dialog id="intel-product-images-dialog" class="intel-detail-dialog" aria-labelledby="intel-product-images-title"><div class="dialog-head"><h2 id="intel-product-images-title">补充产品图片</h2><button type="button" id="intel-product-images-close" class="icon-button" aria-label="关闭产品图片管理">×</button></div><div id="intel-product-images-body" class="dialog-body"></div></dialog>`);
   const view={groups:[],drafts:[],tab:'inquiries',category:'',period:'all',dateBasis:'quote',dateFrom:'',dateTo:'',offset:0,total:0,version:0},upload={files:[],busy:false,group:null},review={draft:null,message:null,linksStale:false};
+  const collapseStorageKey='crm-intel-filters-collapsed';let filtersCollapsed=false;
+  try{filtersCollapsed=sessionStorage.getItem(collapseStorageKey)==='true';}catch{}
+  function showFilters(collapsed){
+    filtersCollapsed=collapsed;
+    $('intel-controls').hidden=collapsed;$('intel-filter-summary').hidden=!collapsed;
+    $('intelligence-dialog').classList.toggle('intel-filters-collapsed',collapsed);
+    $('intel-toggle-filters').textContent=collapsed?'展开筛选 ↓':'收起筛选 ↑';
+    $('intel-toggle-filters').setAttribute('aria-expanded',String(!collapsed));
+  }
+  showFilters(filtersCollapsed);
+  $('intel-toggle-filters').onclick=()=>{showFilters(!filtersCollapsed);try{sessionStorage.setItem(collapseStorageKey,String(filtersCollapsed));}catch{}};
+  function appliedFilters(filters,metadata){
+    const labels=[filters.groupName,({inquiries:'产品询价',messages:'全部聊天',drafts:'待审核导入'})[filters.tab]];
+    if(filters.tab!=='drafts'&&filters.q)labels.push('搜索：'+filters.q);
+    if(filters.tab==='inquiries'){
+      labels.push(filters.statusName);
+      const category=metadata.category_facets?.items.find(c=>c.id===filters.category);
+      labels.push(category?.name||(filters.category==='uncategorized'?'未分类':'全部分类'));
+      const date=metadata.date_filter,basis=filters.dateBasis==='quote'?'报价日期':'询价日期';
+      labels.push(date?.active?basis+'：'+(date.period==='unknown'?'日期未确认':date.date_from+' 至 '+date.date_to):'不限时间');
+    }
+    const text=labels.join(' · ');$('intel-applied-filters').textContent=text;$('intel-applied-filters').title=text;
+  }
   let matchVersion=0,matchScope='',lastAnalysis=null,detailVersion=0,editVersion=0;
   const draftPhotos=new WeakMap();let photoVersion=0,photoBusy=false;
   const intelJobStorageKey='crm-intelligence-job';let intelJobId='';
@@ -76,6 +100,8 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
   }
   async function list(){
     const version=++view.version,group=$('intel-group').value,q=$('intel-search').value.trim();
+    const filters={tab:view.tab,q,category:view.category,dateBasis:view.dateBasis,groupName:view.groups.find(g=>g.id===group)?.name||'全部微信群',statusName:$('intel-status').selectedOptions[0].textContent};
+    $('intel-applied-filters').textContent='正在读取智库…';$('intel-applied-filters').removeAttribute('title');
     $('intel-list').innerHTML='<p class="memory-meta">正在读取智库…</p>';
     $('intel-categories').hidden=view.tab!=='inquiries';
     $('intel-time-filter').hidden=view.tab!=='inquiries';
@@ -89,6 +115,7 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
       }
       if(version!==view.version||!$('intelligence-dialog').open)return;
       view.total=total;
+      appliedFilters(filters,metadata);
       categoryFilters(metadata.category_facets);
       if(metadata.date_filter){
         const f=metadata.date_filter,basis=f.date_basis==='quote'?'报价':'询价';
@@ -101,7 +128,7 @@ export function initIntelligence({api,post,toast,showSmall,copy,getState}){
       bindCards($('intel-list'));
       $('intel-list').querySelectorAll('[data-intel-draft]').forEach(b=>b.onclick=async()=>{try{openReview(await api('/api/intelligence/drafts/'+b.dataset.intelDraft));}catch(error){toast(error.message,true);}});
       $('intel-list').querySelectorAll('[data-intel-delete-draft]').forEach(b=>b.onclick=async()=>{if(!confirm('删除这份尚未归档的草稿及截图？'))return;try{await api('/api/intelligence/drafts/'+b.dataset.intelDeleteDraft,{method:'DELETE'});await groups();await list();}catch(error){toast(error.message,true);}});
-    }catch(error){if(version===view.version){$('intel-list').textContent=error.message;$('intel-categories').querySelectorAll('button').forEach(b=>b.disabled=false);}}
+    }catch(error){if(version===view.version){$('intel-list').textContent=error.message;$('intel-applied-filters').textContent='读取失败，请展开筛选后重试。';$('intel-categories').querySelectorAll('button').forEach(b=>b.disabled=false);}}
   }
   document.querySelectorAll('[data-intel-tab]').forEach(b=>b.onclick=()=>{view.tab=b.dataset.intelTab;view.offset=0;document.querySelectorAll('[data-intel-tab]').forEach(t=>t.classList.toggle('active',t===b));$('intel-status').disabled=view.tab!=='inquiries';list();});
   $('intel-search-btn').onclick=()=>{view.offset=0;list();};$('intel-search').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();view.offset=0;list();}};
